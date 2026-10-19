@@ -42,7 +42,7 @@ Then run these in order (the times are for a 10-core laptop):
 | 6 | `python analyse.py` | 10 s | writes `results/REPORT.md` and `figures/*.png` |
 
 `python run_experiments.py --quick` (3 seeds, no sweeps) finishes in under a minute.
-`python demo.py --workload W5` runs the demo on another workload.
+`python demo.py --workload W5` runs the demo on another workload, and `python demo.py --part 1` (or `2`, `3`) runs a single part.
 
 ## What to show in the presentation
 
@@ -54,10 +54,31 @@ Then run these in order (the times are for a 10-core laptop):
 3. `figures/fig1_avg_wait.png` and `results/REPORT.md`: the full results and
    the verdict on every hypothesis.
 
-## Documents for submission
+## Final documents
 
 | File | What it is |
 |---|---|
+| `docs/reviews/Review_1.pdf` | Review 1: title and team, abstract, introduction, literature survey, gaps in existing work (8 pages) |
+| `docs/reviews/Review_2.pdf` | Review 2: proposed methodology, architecture, outputs with Terminal screenshots (10 pages) |
+| `docs/reviews/Review_3.pdf` | Review 3: performance evaluation, comparison with existing systems, conclusion and future work, references (10 pages) |
+| `docs/reviews/Review_3.pptx` | Review 3 presentation, 10 slides with speaker notes, screenshots and results |
+| `docs/guide/guide.pdf` | End-to-end project guide with code and output screenshots (15 pages) |
+| `docs/guide/transcript.pdf` | 5-minute speaking script for the Review 3 slides (key points in bold) |
+| `docs/terminal/*.png` | Real Terminal screenshots of the project running and of the key code |
+
+Older material from earlier reviews is also in `docs/` (`project_review.pdf`, `ieee_paper.pdf`).
+
+**Rebuilding them** (all built from HTML sources with Google Chrome):
+
+```bash
+sh docs/reviews/build.sh      # Review_1/2/3.pdf from docs/reviews/src/
+sh docs/guide/build.sh        # guide.pdf and transcript.pdf from docs/guide/src/
+```
+
+The slide deck is built by `docs/reviews/src/review3_ppt.js` with Node and `pptxgenjs`
+(`NODE_PATH=<folder containing pptxgenjs>/node_modules node docs/reviews/src/review3_ppt.js`).
+
+---|---|
 | `docs/project_review.pdf` | 3-page project review |
 | `docs/ieee_paper.pdf` | final paper in IEEE conference format (5 pages) |
 | `docs/screenshots/*.png` | real program output rendered as terminal screenshots |
@@ -89,7 +110,10 @@ ai_cpu_scheduler/
 ├── analyse.py              tables, hypothesis verdicts, figures
 ├── demo.py                 live terminal demo
 ├── make_screenshots.py     renders real program output as PNG screenshots
-├── docs/                   review PDF, IEEE paper PDF, their HTML sources, screenshots
+├── docs/
+│   ├── reviews/            Review 1, 2, 3 PDFs, Review 3 slides, and their sources
+│   ├── guide/              project guide and presentation transcript
+│   └── terminal/           real Terminal screenshots
 ├── models/                 trained models (created by train_models.py)
 ├── results/                raw CSVs, REPORT.md, model_report.json
 └── figures/                PNG figures for the report and slides

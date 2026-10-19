@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Presentation Transcript (5 minutes) - Adaptive CPU Scheduling</title>
+<link rel="stylesheet" href="../../reviews/src/style.css">
+<style>
+  @page :first { @bottom-center { content: counter(page); font-family: "Times New Roman", Times, serif; font-size: 11pt; } }
+  .head { text-align: center; margin-bottom: 10pt; }
+  .head h1 { font-size: 17pt; margin-bottom: 2pt; }
+  .head p { text-align: center; margin: 0; }
+  .speaker { font-weight: bold; margin: 4pt 0 1pt; break-after: avoid; }
+  .cue { font-style: italic; margin: 2pt 0 4pt; }
+  .slide { font-size: 12.5pt; font-weight: bold; margin: 8pt 0 3pt; border-bottom: 0.75pt solid #000; padding-bottom: 2pt; break-after: avoid; }
+  .time { font-weight: normal; font-size: 11pt; float: right; }
+  .say p { margin-bottom: 4pt; }
+  .qa p { margin-bottom: 3pt; }
+  body { line-height: 1.38; }
+</style>
+</head>
+<body>
+
+<div class="head">
+  <h1>Presentation Transcript (5 minutes)</h1>
+  <p>Review 3 deck &middot; Adaptive CPU Scheduling Using Predicted Burst Lengths</p>
+  <p>Shivaansh Aggarwal (24BCE0883) &middot; Devansh Sharma (24BCE0717)</p>
+</div>
+
+<p><b>Shivaansh:</b> slides 1, 2 (first half), 3, 5, 7, 9, 10. <b>Devansh:</b> slides 2 (second half), 4, 6, 8. <i>Italics = what to do, not what to say.</i> The slide numbers match <b>Review_3.pptx</b>.</p>
+
+<div class="slide">1 &ndash; Title <span class="time">15 s</span></div>
+<p class="speaker">Shivaansh</p>
+<div class="say"><p>Good morning ma'am. I'm Shivaansh, and this is Devansh. Our project is a CPU scheduler that <b>predicts how long a program will run next</b>, and uses that to decide <b>which program runs and for how long</b>.</p></div>
+
+<div class="slide">2 &ndash; Recap: problem and approach <span class="time">45 s</span></div>
+<p class="speaker">Shivaansh</p>
+<div class="say"><p>The classical algorithms are <b>static</b>. FCFS gives <b>17 ms</b> average wait on the 24, 3, 3 example; SJF gives <b>3 ms</b> but needs the next burst, which <b>the OS doesn't know</b>; and Round Robin's quantum is <b>fixed by hand</b>. The usual estimate, exponential averaging, <b>lags</b> when a process changes behaviour.</p></div>
+<p class="speaker">Devansh</p>
+<div class="say"><p>So we <b>predict the next burst with a gradient boosting model</b>, which is <b>14% more accurate</b>, and use it twice: to pick <b>who runs</b>, with <b>ageing</b> so nothing starves, and to set <b>how long it runs</b> using the textbook <b>80% rule, automatically</b>.</p></div>
+
+<div class="slide">3 &ndash; Experimental setup <span class="time">25 s</span></div>
+<p class="speaker">Shivaansh</p>
+<div class="say"><p>We tested <b>6 workload types, 11 schedulers and 10 seeds, 660 paired runs</b>, so every scheduler sees exactly the same processes. The model and the ageing weight were tuned on <b>separate seeds</b>, never on the test data.</p></div>
+
+<div class="slide">4 &ndash; The simulator matches the textbook <span class="time">25 s</span></div>
+<p class="speaker">Devansh</p>
+<div class="say"><p>Before any ML, we verified the simulator: FCFS gives exactly <b>17</b>, shortest-first <b>3</b>, Round Robin <b>5.67</b> and SRTF <b>6.5</b>, and <b>all 37 tests pass</b>.</p></div>
+
+<div class="slide">5 &ndash; Main result <span class="time">30 s</span></div>
+<p class="speaker">Shivaansh</p>
+<div class="say"><p>On the mixed workload, the realistic case, our scheduler has <b>27% less waiting than SJF</b>, and it is better on <b>all 10 seeds</b>. It closes <b>54% of the gap to the oracle</b>, which knows the future, and uses <b>61% fewer context switches</b> than Round Robin with 5 ms.</p></div>
+
+<div class="slide">6 &ndash; Live run <span class="time">30 s</span></div>
+<p class="speaker">Devansh</p>
+<p class="cue">Optional: run <code>python demo.py --part 3</code> in Terminal; otherwise point at the screenshot.</p>
+<div class="say"><p>This is a real run of all <b>11 schedulers on one workload</b>. Ours, highlighted, waits about <b>1,900 ms against 2,800 for SJF</b>, with a lower worst case and <b>far fewer switches</b> than Round Robin.</p></div>
+
+<div class="slide">7 &ndash; Results across workloads <span class="time">30 s</span></div>
+<p class="speaker">Shivaansh</p>
+<div class="say"><p>Across all six workloads, the clear win is the <b>mixed workload</b>. <b>Ageing halves the worst-case wait</b> on CPU-bound and phase-changing work. To be honest about the limits, it is <b>14% worse on all-I/O work</b>, where bursts are tiny and random.</p></div>
+
+<div class="slide">8 &ndash; Why it works <span class="time">30 s</span></div>
+<p class="speaker">Devansh</p>
+<div class="say"><p>The quantum <b>follows the workload</b>: about <b>6 ms for interactive, 100 ms for CPU-bound and 3.5 ms for I/O-bound</b>. Switching parts off shows that <b>without ageing the worst case doubles</b>, and that prediction alone gives only 5%. <b>The gain comes from using the prediction twice.</b></p></div>
+
+<div class="slide">9 &ndash; Comparison with existing schedulers <span class="time">30 s</span></div>
+<p class="speaker">Shivaansh</p>
+<div class="say"><p>Against existing schedulers, ours has the <b>lowest average wait except SRTF</b>, which is 3% better on average but has a <b>35% higher worst case</b>. MLFQ is close but needs <b>twice the switches</b>. And unlike the papers we studied, we <b>never assume burst lengths are known</b>.</p></div>
+
+<div class="slide">10 &ndash; Conclusion and future work <span class="time">25 s</span></div>
+<p class="speaker">Shivaansh</p>
+<div class="say"><p>So <b>applying the textbook quantum rule automatically from predictions works</b>: <b>27% less waiting</b> on mixed workloads, with the worst case halved. Next, we'd test on <b>real program traces</b> and move it into <b>xv6</b>. <b>Thank you, ma'am.</b></p></div>
+
+<p><b>Total: about 4.5 minutes.</b></p>
+
+<div class="slide">If asked &ndash; one-line answers</div>
+<div class="qa">
+<p><b>Why ML?</b> (Devansh) <b>12&ndash;22% more accurate</b> than exponential averaging, but the big gain comes from <b>using the prediction twice</b>.</p>
+<p><b>Is the simulator correct?</b> (Shivaansh) <b>Exact textbook answers</b> and <b>37 tests pass</b>.</p>
+<p><b>What if the prediction is wrong?</b> (Devansh) The process still runs; <b>ageing guarantees it gets the CPU</b>, and the quantum corrects with <b>recent errors</b>.</p>
+<p><b>Did you tune on test data?</b> (Devansh) No, training and tuning used <b>separate seeds</b>.</p>
+<p><b>Real OS?</b> (Shivaansh) It's a <b>controlled experiment</b>; a kernel would need a smaller model, and <b>xv6</b> is next.</p>
+</div>
+
+</body>
+</html>

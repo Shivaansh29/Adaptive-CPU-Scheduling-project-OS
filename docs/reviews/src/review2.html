@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Review 2 - Adaptive CPU Scheduling Using Predicted Burst Lengths</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="cover">
+  <img src="../assets/vit_logo.png" alt="Vellore Institute of Technology">
+  <div class="course">Operating System (BCSE303P)</div>
+  <div class="doc">Course Project &ndash; Review 2</div>
+  <div class="slot">L15+L16</div>
+  <div class="faculty">Faculty: Dr. Anisha M. Lal</div>
+  <div class="title">Adaptive CPU Scheduling Using Predicted Burst Lengths</div>
+  <div class="by">Submitted by</div>
+  <table class="team">
+    <tr><td>Shivaansh Aggarwal</td><td>24BCE0883</td></tr>
+    <tr><td>Devansh Sharma</td><td>24BCE0717</td></tr>
+  </table>
+</div>
+
+<h1>Proposed Methodology, Architecture and Outputs</h1>
+<p>Review 1 identified two main weaknesses of classical CPU scheduling: the next CPU burst is not known, so SJF has to rely on a weak estimate, and the Round Robin quantum is fixed by hand. This document describes how the project addresses them. Section 1 explains the proposed methodology, Section 2 the system architecture, and Section 3 shows outputs of the implemented system running in the terminal.</p>
+
+<h2>1. Proposed Methodology</h2>
+
+<h3>1.1 Overview</h3>
+<p>The project follows five steps:</p>
+<ol>
+  <li>Build a single-CPU discrete-event simulator in which the scheduling policy can be swapped without changing anything else, and check it against hand-computed textbook examples.</li>
+  <li>Generate synthetic workloads with different kinds of processes, each made of alternating CPU and I/O bursts.</li>
+  <li>Train a model that predicts the length of a process's next CPU burst from its past behaviour.</li>
+  <li>Design the adaptive scheduler, which uses the prediction to order the ready queue (with ageing) and to resize the time quantum while the system runs.</li>
+  <li>Run every scheduler on the same workloads and compare them (covered in Review 3).</li>
+</ol>
+
+<h3>1.2 Workload model</h3>
+<p>Each process alternates between CPU bursts and I/O waits: <i>cpu, io, cpu, io, &hellip;, cpu</i>. Four types of process are generated, with parameters chosen to resemble typical behaviour (Table 1). A phase-changing process behaves like an I/O-bound process for the first half of its life and like a CPU-bound process for the second half, which is exactly the case where exponential averaging struggles.</p>
+<p class="tcaption">Table 1. Process types used in the workloads (times in ms)</p>
+<table>
+  <tr><th>Process type</th><th>CPU burst length</th><th>Mean I/O wait</th><th>Number of bursts</th></tr>
+  <tr><td>CPU-bound</td><td>Lognormal, median 100</td><td>5</td><td>3&ndash;8</td></tr>
+  <tr><td>I/O-bound</td><td>Exponential, mean 2</td><td>30</td><td>20&ndash;60</td></tr>
+  <tr><td>Interactive</td><td>Exponential, mean 5</td><td>100</td><td>10&ndash;40</td></tr>
+  <tr><td>Phase-changing</td><td>I/O-bound first half, CPU-bound second half</td><td>as per phase</td><td>10&ndash;30</td></tr>
+</table>
+<p>Processes arrive according to a Poisson process, with the arrival rate set so that the CPU is about 85% loaded. Six workload profiles of 200 processes each are used: W1 (all CPU-bound), W2 (all I/O-bound), W3 (all interactive), W4 (mixed: 40% interactive, 30% CPU-bound, 20% I/O-bound, 10% phase-changing), W5 (all phase-changing) and W6 (W4 with three times the arrival rate, to overload the system). Every workload is generated from a random seed, so it can be reproduced exactly.</p>
+
+<h3>1.3 Simulation engine</h3>
+<p>The simulator is event-driven. A priority queue holds three kinds of events: a process arriving, a process finishing its I/O, and a CPU time slice ending. When the CPU becomes free, the engine asks the current scheduling policy which ready process to run and for how long. The engine itself never makes a scheduling decision. Because of this separation, all eleven schedulers compared in this project run on exactly the same arrivals, burst lengths, I/O times and context-switch cost (0.1 ms per switch), and the only thing that differs between runs is the policy. Only the engine and the oracle can see the true length of a burst; every other policy has to work with estimates.</p>
+
+<h3>1.4 Burst prediction model</h3>
+<p>For each process, twelve features are computed from information the operating system already keeps about it. None of them uses future bursts (Table 2).</p>
+<p class="tcaption">Table 2. Features used to predict the next CPU burst</p>
+<table>
+  <tr><th style="width:38%">Feature</th><th>Meaning</th></tr>
+  <tr><td>Last 5 burst lengths</td><td>The five most recent CPU bursts (zero if not available yet)</td></tr>
+  <tr><td>Mean and standard deviation</td><td>Of all completed bursts of the process</td></tr>
+  <tr><td>Exponential average estimate</td><td>The classical estimate, so the model can build on it</td></tr>
+  <tr><td>Last and mean I/O wait</td><td>How long the process blocks between bursts</td></tr>
+  <tr><td>Bursts completed</td><td>How far the process is into its life</td></tr>
+  <tr><td>Last change</td><td>Difference between the last two bursts</td></tr>
+</table>
+<p>The training data comes from 2,000 generated processes (45,389 bursts) created with random seeds that are never used in the experiments. It was split into training and test sets <i>by process</i> rather than by row, so that bursts from the same process never appear on both sides. Four regression models were compared with exponential averaging on the held-out processes, and the rule was to choose the lowest mean absolute error (MAE) within a latency budget of 1 ms per prediction. Gradient boosting trained on the logarithm of the burst length gave the lowest error, 10.6 ms against 12.4 ms for exponential averaging, and it was more accurate for every process type (Table 3). A logistic regression classifier (macro-F1 score 0.94) is also trained to label each process as CPU-bound, I/O-bound or interactive.</p>
+<p class="tcaption">Table 3. Prediction error on held-out processes (MAE in ms)</p>
+<table>
+  <tr><th>Model</th><th class="n">Overall</th><th class="n">CPU-bound</th><th class="n">I/O-bound</th><th class="n">Interactive</th><th class="n">Phase-changing</th></tr>
+  <tr><td>Exponential averaging</td><td class="n">12.36</td><td class="n">60.1</td><td class="n">1.91</td><td class="n">4.38</td><td class="n">31.5</td></tr>
+  <tr><td>Ridge regression</td><td class="n">14.82</td><td class="n">54.9</td><td class="n">5.89</td><td class="n">5.86</td><td class="n">34.2</td></tr>
+  <tr><td>Gradient boosting</td><td class="n">12.59</td><td class="n">53.1</td><td class="n">3.59</td><td class="n">4.76</td><td class="n">30.5</td></tr>
+  <tr><td><b>Gradient boosting (log target)</b></td><td class="n"><b>10.62</b></td><td class="n"><b>54.1</b></td><td class="n"><b>1.53</b></td><td class="n"><b>3.59</b></td><td class="n"><b>26.8</b></td></tr>
+</table>
+<p>The model also has a feedback loop. Whenever a burst finishes, its actual length is compared with the prediction, the error is recorded, and the burst is stored as a new training example. After every 2,000 new examples the model is refitted on the original training data plus these new examples.</p>
+
+<h3>1.5 Ordering the ready queue with ageing</h3>
+<p>When the CPU is free, every ready process <i>i</i> is given a priority value</p>
+<p class="eq">P<sub>i</sub> = r<sub>i</sub> &minus; &beta; &times; w<sub>i</sub></p>
+<p>where r<sub>i</sub> is the predicted time left in its current burst and w<sub>i</sub> is the time it has been waiting in the ready queue. The process with the lowest value runs next. Without the second term this is simply SJF on predicted bursts, which can starve a long process if short ones keep arriving. The ageing term lowers the value of a process the longer it waits, so it eventually reaches the front. For example, with &beta; = 0.1, a process predicted to need 50 ms that has waited 400 ms gets P = 50 &minus; 40 = 10 and will run before a fresh process predicted at 20 ms. The value &beta; = 0.03 used in the final system was chosen on separate tuning workloads, so that the evaluation workloads were never used to tune it.</p>
+
+<h3>1.6 Adaptive time quantum</h3>
+<p>The textbook rule says that about 80% of CPU bursts should finish within one quantum. The quantum controller applies this rule every 50 scheduling decisions, using the predicted bursts of the processes that became ready during that period:</p>
+<p class="eq">q<sub>new</sub> = clamp( 80th percentile of { predicted burst &times; error ratio }, 1 ms, 100 ms )</p>
+<p class="eq">q = 0.3 &times; q<sub>new</sub> + 0.7 &times; q</p>
+<p>The second line smooths the change so that the quantum does not jump around. The error ratio (actual burst divided by predicted burst, for the last 200 completed bursts) was added after the first version of the controller. That version took the percentile of the raw predictions, and we found that it made the quantum too small on I/O-bound and interactive workloads. The reason is that a prediction is an average, so predictions are much less spread out than real bursts: I/O-bound bursts average 2 ms and almost every prediction is close to 2 ms, yet 20% of the real bursts are longer than 3.2 ms. Multiplying each prediction by recent error ratios brings back the real spread, so the percentile reflects the bursts that will actually run.</p>
+<p>The classifier adjusts the percentile slightly: if most recent processes look interactive, the percentile is lowered (a smaller quantum and quicker response), and if most look CPU-bound it is raised (a larger quantum and fewer context switches).</p>
+
+<h3>1.7 Scheduling algorithm</h3>
+<p>Putting the parts together, the adaptive scheduler works as follows:</p>
+<ol>
+  <li>When a process enters the ready queue for a new burst, compute its features and predict the length of the burst.</li>
+  <li>When the CPU becomes free, compute P = r &minus; &beta;w for every ready process and dispatch the one with the lowest value.</li>
+  <li>Let it run for at most the current quantum q. If the burst finishes, the process goes to I/O (or terminates). If the quantum expires first, it returns to the ready queue with its remaining predicted time reduced.</li>
+  <li>When a burst finishes, record the prediction error and add the burst to the training buffer (feedback loop).</li>
+  <li>Every 50 decisions, recompute the quantum from the predicted bursts and recent error ratios. Every 2,000 new examples, refit the model.</li>
+</ol>
+
+<h3>1.8 Baseline algorithms implemented</h3>
+<p>To compare fairly, the following existing algorithms were implemented in the same simulator: FCFS; SJF and SRTF using exponential averaging (&alpha; = 0.5); Round Robin with quanta of 2, 5, 10 and 20 ms; a multilevel feedback queue with three levels (quanta 4, 8 and 16 ms, priority boost every 200 ms); and an oracle, which is SRTF given the true burst lengths, as the best-case reference. A second version of the proposed scheduler that uses exponential averaging instead of the learned model (Adaptive-EMA) is also included, to separate the effect of the model from the effect of the scheduling method. With the proposed scheduler (Adaptive-ML), this gives eleven configurations.</p>
+
+<h2>2. System Architecture</h2>
+
+<h3>2.1 Architecture diagram</h3>
+<figure class="keep">
+<svg viewBox="0 0 690 590" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="Times New Roman, Times, serif" font-size="13" fill="none" stroke="#000">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#000" stroke="none"/></marker>
+  </defs>
+  <g stroke-width="1.2">
+    <rect x="220" y="10" width="250" height="46"/>
+    <rect x="170" y="96" width="350" height="56"/>
+    <rect x="205" y="192" width="280" height="40"/>
+    <rect x="25" y="278" width="190" height="104"/>
+    <rect x="240" y="266" width="425" height="256" stroke-dasharray="6 4"/>
+    <rect x="255" y="304" width="125" height="46"/>
+    <rect x="395" y="304" width="125" height="46"/>
+    <rect x="535" y="304" width="115" height="46"/>
+    <rect x="255" y="388" width="180" height="48"/>
+    <rect x="455" y="388" width="195" height="48"/>
+    <rect x="255" y="468" width="395" height="40"/>
+    <rect x="25" y="430" width="190" height="46"/>
+    <rect x="25" y="526" width="190" height="46"/>
+  </g>
+  <g fill="#000" stroke="none" text-anchor="middle">
+    <text x="345" y="30" font-weight="bold">Workload Generator</text>
+    <text x="345" y="47">W1–W6, Poisson arrivals, CPU/I/O bursts</text>
+    <text x="345" y="118" font-weight="bold">Simulation Engine</text>
+    <text x="345" y="137">clock, event queue, PCBs, context-switch cost</text>
+    <text x="345" y="217" font-weight="bold">Scheduling Policy Interface</text>
+    <text x="120" y="300" font-weight="bold">Baseline Policies</text>
+    <text x="120" y="322">FCFS, SJF-EMA, SRTF-EMA</text>
+    <text x="120" y="341">RR (2, 5, 10, 20 ms)</text>
+    <text x="120" y="360">MLFQ, Oracle</text>
+    <text x="452" y="287" font-weight="bold">Adaptive Scheduler (proposed)</text>
+    <text x="317" y="324">Feature</text><text x="317" y="341">Extractor</text>
+    <text x="457" y="324">Burst Predictor</text><text x="457" y="341">(gradient boosting)</text>
+    <text x="592" y="324">Process</text><text x="592" y="341">Classifier</text>
+    <text x="345" y="408">Ready-queue ordering</text><text x="345" y="426">P = r − β·w (ageing)</text>
+    <text x="552" y="408">Quantum Controller</text><text x="552" y="426">80th pct × error ratio</text>
+    <text x="452" y="486">Feedback loop: actual vs predicted burst,</text><text x="452" y="502">error log, training buffer, periodic refit</text>
+    <text x="120" y="450" font-weight="bold">Metrics Collector</text>
+    <text x="120" y="467">waiting, response, switches</text>
+    <text x="120" y="546" font-weight="bold">Analysis</text>
+    <text x="120" y="563">tables, figures, report</text>
+    <text x="352" y="80" font-size="12" text-anchor="start">processes</text>
+    <text x="308" y="177" font-size="12" text-anchor="end">select / time slice</text>
+    <text x="392" y="177" font-size="12" text-anchor="start">decision</text>
+    <text x="676" y="252" font-size="12" text-anchor="end">completed bursts</text>
+  </g>
+  <g stroke-width="1.2" marker-end="url(#a)">
+    <line x1="345" y1="56" x2="345" y2="95"/>
+    <line x1="315" y1="152" x2="315" y2="191"/>
+    <line x1="385" y1="191" x2="385" y2="153"/>
+    <line x1="270" y1="232" x2="150" y2="277"/>
+    <line x1="420" y1="232" x2="452" y2="265"/>
+    <line x1="380" y1="327" x2="394" y2="327"/>
+    <line x1="430" y1="350" x2="390" y2="387"/>
+    <line x1="490" y1="350" x2="520" y2="387"/>
+    <line x1="592" y1="350" x2="592" y2="387"/>
+    <line x1="445" y1="468" x2="445" y2="351"/>
+    <line x1="600" y1="468" x2="600" y2="437"/>
+    <polyline points="520,124 682,124 682,488 651,488"/>
+    <polyline points="170,124 12,124 12,453 24,453"/>
+    <line x1="120" y1="476" x2="120" y2="525"/>
+  </g>
+</svg>
+<figcaption>Fig. 1. System architecture</figcaption>
+</figure>
+
+<p>The <b>workload generator</b> creates the processes for a run. The <b>simulation engine</b> owns the clock, the event queue and the process control blocks, and calls the <b>scheduling policy interface</b> every time a decision is needed. Any policy can be plugged in: the baselines or the proposed <b>adaptive scheduler</b>. Inside the adaptive scheduler, the feature extractor turns a process's history into twelve numbers, the burst predictor estimates the next burst, the process classifier labels the process type, the ready-queue ordering applies the ageing formula, and the quantum controller recomputes the time slice. Completed bursts flow back into the <b>feedback loop</b>, which logs errors and refits the model. The <b>metrics collector</b> computes waiting, turnaround and response times, context switches and other measures after each run, and the <b>analysis</b> step turns them into tables and figures.</p>
+
+<h3>2.2 Module structure</h3>
+<p class="tcaption">Table 4. Main modules of the implementation</p>
+<table>
+  <tr><th style="width:32%">Module</th><th>Responsibility</th></tr>
+  <tr><td>scheduler/workload.py</td><td>Generates process types and workload profiles W1&ndash;W6</td></tr>
+  <tr><td>scheduler/engine.py</td><td>Event-driven simulator, PCBs and the policy interface</td></tr>
+  <tr><td>scheduler/baselines.py</td><td>FCFS, SJF, SRTF, Round Robin, MLFQ and the oracle</td></tr>
+  <tr><td>scheduler/features.py</td><td>Feature extraction and exponential averaging</td></tr>
+  <tr><td>scheduler/predictor.py</td><td>Exponential-average predictor, learned predictor with feedback loop, classifier</td></tr>
+  <tr><td>scheduler/adaptive.py</td><td>The proposed scheduler (ordering with ageing)</td></tr>
+  <tr><td>scheduler/quantum.py</td><td>Adaptive time quantum controller</td></tr>
+  <tr><td>scheduler/metrics.py</td><td>Waiting, turnaround and response time, fairness, starvation</td></tr>
+  <tr><td>train_models.py</td><td>Builds the dataset, compares the models and saves the chosen ones</td></tr>
+  <tr><td>run_experiments.py, analyse.py</td><td>Runs all experiments in parallel and produces tables and figures</td></tr>
+  <tr><td>demo.py</td><td>Short demonstration of the whole system in the terminal</td></tr>
+  <tr><td>tests/</td><td>37 automated tests, including the textbook examples</td></tr>
+</table>
+
+<h3>2.3 Tools and technologies</h3>
+<p>The project is written in Python 3. NumPy and pandas are used for numerical work and result tables, scikit-learn [2] for the prediction and classification models, Matplotlib for figures, and pytest for testing. Git is used for version control. Development and testing were done on macOS.</p>
+
+<h2>3. Outputs</h2>
+<p>The screenshots below were taken in the terminal while running the project.</p>
+
+<figure>
+<img src="../../terminal/01_project_files.png" alt="Project files">
+<figcaption>Fig. 2. Files of the project, with the scheduler package and the test suite</figcaption>
+</figure>
+
+<figure>
+<img src="../../terminal/02_tests.png" alt="Test results">
+<figcaption>Fig. 3. All 37 automated tests passing</figcaption>
+</figure>
+<p>The tests check the simulator against textbook results, verify that every scheduler delivers exactly the same total CPU time, check that the features never use future bursts, and confirm that with ageing and the adaptive quantum turned off, the proposed scheduler behaves exactly like SJF.</p>
+
+<figure>
+<img src="../../terminal/03_train.png" alt="Model training">
+<figcaption>Fig. 4. Training and comparing the prediction models</figcaption>
+</figure>
+<p>The training script builds the dataset, splits it by process, compares the regression models against exponential averaging and selects gradient boosting on log burst length. It then compares the two classifiers and picks logistic regression, which is almost as accurate as the random forest but more than twenty times faster.</p>
+
+<figure>
+<img src="../../terminal/04_demo_textbook.png" alt="Textbook verification">
+<figcaption>Fig. 5. Simulator output for the textbook examples, with Gantt charts</figcaption>
+</figure>
+<p>Before any learning was added, the simulator was checked against textbook examples [1]. FCFS on bursts of 24, 3 and 3 ms gives an average waiting time of exactly 17 ms, running the shortest first gives 3 ms, Round Robin with a quantum of 4 ms gives 5.67 ms, and SRTF on four processes arriving at 0, 1, 2 and 3 ms gives 6.5 ms.</p>
+
+<figure>
+<img src="../../terminal/05_demo_prediction.png" alt="Prediction comparison">
+<figcaption>Fig. 6. Exponential averaging compared with the learned model on a phase-changing process</figcaption>
+</figure>
+<p>The first table shows exponential averaging taking several bursts to catch up after a process changes phase. The second uses a real phase-changing process from workload W5. When the first long burst arrives, neither predictor could have known in advance, but over all 29 bursts of this process the learned model's mean error is lower.</p>
+
+<figure>
+<img src="../../terminal/06_demo_comparison.png" alt="Scheduler comparison">
+<figcaption>Fig. 7. All eleven schedulers run on the same mixed workload (W4)</figcaption>
+</figure>
+<p>In this single run on the mixed workload, the proposed scheduler (Adaptive-ML, highlighted) has an average waiting time of 1,918 ms against 2,804 ms for SJF with exponential averaging, a lower worst-case waiting time, and fewer than half the context switches of Round Robin with a 5 ms quantum. The full evaluation over all workloads and ten random seeds is presented in Review 3.</p>
+
+<h2>References</h2>
+<div class="refs">
+<p>[1] A. Silberschatz, P. B. Galvin, and G. Gagne, <i>Operating System Concepts</i>, 10th ed. Hoboken, NJ, USA: Wiley, 2018, ch. 5.</p>
+<p>[2] F. Pedregosa <i>et al.</i>, &ldquo;Scikit-learn: Machine learning in Python,&rdquo; <i>Journal of Machine Learning Research</i>, vol. 12, pp. 2825&ndash;2830, 2011.</p>
+</div>
+
+</body>
+</html>

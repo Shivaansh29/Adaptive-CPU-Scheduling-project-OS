@@ -2,6 +2,7 @@
 
     python demo.py              # all three parts, mixed workload W4
     python demo.py --workload W5
+    python demo.py --part 3     # only one part
 
 1. The simulator reproduces the textbook answers (with Gantt charts).
 2. Why exponential averaging lags, and what the learned model does instead.
@@ -121,18 +122,22 @@ def comparison(workload, seed):
     print(f"\n  Adaptive-ML vs SJF-EMA: average wait {change:+.1f}%, worst-case wait "
           f"{100 * (ours['max_wait'] / sjf['max_wait'] - 1):+.1f}%")
     print(f"  Share of the SJF-EMA -> oracle gap closed: {gap:.0f}%")
-    print(f"\n  {DIM}Oracle = {DESCRIPTIONS['Oracle']}. One seed only; the full experiment "
-          f"(run_experiments.py) uses 10 seeds per workload.{RESET}")
+    print(f"\n  {DIM}Oracle = {DESCRIPTIONS['Oracle']}.")
+    print(f"  One seed only; the full experiment (run_experiments.py) uses 10 seeds per workload.{RESET}")
 
 
 def main():
     parser = argparse.ArgumentParser(description="Live demo of the adaptive CPU scheduler")
     parser.add_argument("--workload", default="W4", choices=list(PROFILES))
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--part", type=int, choices=[1, 2, 3], help="run only one part")
     args = parser.parse_args()
-    textbook()
-    prediction()
-    comparison(args.workload, args.seed)
+    if args.part in (None, 1):
+        textbook()
+    if args.part in (None, 2):
+        prediction()
+    if args.part in (None, 3):
+        comparison(args.workload, args.seed)
     print()
 
 
