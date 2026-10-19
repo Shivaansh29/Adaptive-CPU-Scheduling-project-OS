@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Adaptive CPU Scheduling Using Learned Burst-Length Prediction</title>
+<style>
+  @page { size: letter; margin: 0.75in 0.625in 1in 0.625in; }
+  * { box-sizing: border-box; }
+  body { font-family: "Times New Roman", Times, serif; font-size: 10pt; line-height: 1.14; color: #000; margin: 0; }
+  .title { column-span: all; text-align: center; margin-bottom: 14pt; }
+  .title h1 { font-size: 23pt; font-weight: normal; line-height: 1.12; margin: 0 0 12pt; }
+  .authors { display: flex; justify-content: center; gap: 70pt; font-size: 10pt; line-height: 1.25; }
+  .authors .name { font-size: 11pt; }
+  .authors i { font-style: italic; }
+  .cols { column-count: 2; column-gap: 0.25in; column-fill: balance; }
+  p { margin: 0; text-indent: 1em; text-align: justify; hyphens: auto; }
+  p.noind, h2 + p, h3 + p, .abstract p, figure + p, table + p, .eq + p.cont { text-indent: 0; }
+  .abstract, .keywords { font-size: 9pt; font-weight: bold; text-align: justify; margin-bottom: 6pt; }
+  .abstract i, .keywords i { font-weight: bold; }
+  h2 { font-size: 10pt; font-weight: normal; font-variant: small-caps; text-align: center; margin: 10pt 0 5pt; letter-spacing: 0.2pt; }
+  h3 { font-size: 10pt; font-weight: normal; font-style: italic; margin: 6pt 0 3pt; }
+  ul.contrib { margin: 2pt 0 2pt 0; padding-left: 14pt; }
+  ul.contrib li { margin-bottom: 1.5pt; text-align: justify; }
+  .eq { display: flex; justify-content: space-between; align-items: center; margin: 5pt 0 5pt 8pt; font-style: italic; }
+  .eq span.num { font-style: normal; }
+  table { border-collapse: collapse; margin: 4pt auto 8pt; font-size: 8pt; width: 100%; break-inside: avoid; }
+  caption { caption-side: top; font-size: 8pt; font-variant: small-caps; text-align: center; padding-bottom: 3pt; line-height: 1.3; }
+  caption b { font-weight: normal; display: block; }
+  th, td { padding: 1.4pt 3pt; text-align: right; }
+  th:first-child, td:first-child { text-align: left; }
+  thead tr th { border-top: 0.8pt solid #000; border-bottom: 0.5pt solid #000; font-weight: normal; }
+  tbody tr:last-child td { border-bottom: 0.8pt solid #000; }
+  tr.ours td { font-weight: bold; }
+  .wide { column-span: all; break-inside: avoid; margin: 4pt 0 8pt; }
+  figure { margin: 4pt 0 8pt; break-inside: avoid; text-align: center; }
+  figure img { width: 100%; display: block; }
+  figcaption { font-size: 8pt; text-align: justify; margin-top: 3pt; line-height: 1.25; }
+  .refs { font-size: 8pt; line-height: 1.22; }
+  .refs div { display: flex; gap: 5pt; margin-bottom: 2.5pt; text-align: justify; }
+  .refs span:first-child { min-width: 16pt; }
+  code { font-family: "Courier New", monospace; font-size: 8.8pt; }
+</style>
+</head>
+<body>
+
+<div class="title">
+  <h1>Adaptive CPU Scheduling Using Learned<br>Burst-Length Prediction</h1>
+  <div class="authors">
+    <div><span class="name">Shivaansh Aggarwal</span><br><i>Dept. of Computer Science and Engineering</i><br><i>[Institution name]</i><br>[City], India<br>Reg. No. 24BCE0883</div>
+    <div><span class="name">Devansh Sharma</span><br><i>Dept. of Computer Science and Engineering</i><br><i>[Institution name]</i><br>[City], India<br>Reg. No. 24BCE0717</div>
+  </div>
+</div>
+
+<div class="cols">
+
+<div class="abstract"><i>Abstract</i>—Classical CPU schedulers are static: first-come-first-served ignores burst length, shortest-job-first needs the length of the next CPU burst before it happens, and round robin uses a time quantum chosen once at configuration time. Operating systems usually estimate the next burst with exponential averaging, which lags whenever a process changes behaviour. We present an adaptive scheduler that predicts each process's next CPU burst with a gradient-boosted regressor over twelve history features, and uses the prediction twice: to order the ready queue with an ageing term that prevents starvation, and to recompute the time quantum continuously as an error-aware percentile of the predicted bursts. Using a verified discrete-event simulator, we compare eleven scheduler configurations on six workload types over ten paired seeds (660 runs). The learned predictor is 12–22% more accurate than exponential averaging on every workload. On a mixed workload the scheduler reduces average waiting time by 27% relative to SJF with exponential averaging, better on all ten seeds. It closes 54% of the gap to an oracle with perfect knowledge, lowers worst-case waiting by 23%, and needs 61% fewer context switches than a 5 ms round robin. It does not help on uniform workloads of short random bursts, and we report these negative results alongside an ablation of every component.</div>
+
+<div class="keywords"><i>Index Terms</i>—CPU scheduling, burst prediction, machine learning, time quantum, ageing, discrete-event simulation, operating systems.</div>
+
+<h2>I. Introduction</h2>
+<p>The short-term scheduler decides which ready process receives the CPU next and for how long. That decision, repeated thousands of times per second, determines waiting time, responsiveness and the overhead lost to context switching. The policies taught in every operating systems course [1]–[3] are static. First-come-first-served (FCFS) suffers from the convoy effect: with bursts of 24, 3 and 3 ms the average wait is 17 ms. Shortest-job-first (SJF) is optimal for average waiting time (3 ms on the same jobs), but it requires the length of the next CPU burst, which does not exist when the decision must be made. Round robin (RR) bounds response time with a fixed quantum: small quanta cause many context switches, large quanta make the system sluggish.</p>
+<p>Real systems approximate SJF by estimating the next burst with exponential averaging, τ<sub>n+1</sub> = α t<sub>n</sub> + (1 − α) τ<sub>n</sub> [1]. The estimate uses only one number, the process's own past burst lengths, and lags after a phase change. For bursts 2, 2, 2, 2, 60, 60, 60 with α = 0.5 it predicts 2, 31, 45.5 and 52.75, misjudging the process for three to four bursts. Similarly, the textbook guideline that about 80% of CPU bursts should fit within one quantum [1] is applied once by a person, because no scheduler measures the burst distribution.</p>
+<p>This paper asks whether a learned burst predictor, used both for ordering and for quantum sizing, measurably improves scheduling. Our contributions are:</p>
+<ul class="contrib">
+<li>a single-CPU discrete-event simulator, verified against textbook results, in which every policy sees identical workloads;</li>
+<li>a burst predictor trained and evaluated with a split by process, compared directly with exponential averaging;</li>
+<li>an adaptive scheduler combining predicted-burst ordering, ageing, and an error-aware quantum controller;</li>
+<li>a paired evaluation of 660 runs with hypotheses stated in advance, an ablation study, and an explicit report of where the method does not help.</li>
+</ul>
+
+<h2>II. Background and Related Work</h2>
+<p>FCFS, SJF, shortest-remaining-time-first (SRTF) and RR are standard [1], [2]. The multilevel feedback queue (MLFQ), introduced with the Compatible Time-Sharing System [7], approximates SJF without burst estimates by demoting processes that consume their quantum and periodically boosting all processes to prevent starvation [3]. Linux's Completely Fair Scheduler instead allocates CPU time in proportion to weights and does not predict bursts [6]. Predicting run times from history has a long record in batch and parallel job scheduling, where historical information [8] and system-generated predictions [9] improve on user estimates. Our work applies the same idea at the granularity of individual CPU bursts. We compare against an oracle that knows every burst, which shows how much of the achievable improvement a predictor captures. We use gradient boosting [10] through scikit-learn [5], and Jain's index [4] for fairness.</p>
+
+<h2>III. System Design</h2>
+<h3>A. Simulation Engine</h3>
+<p>The engine is event-driven: a binary-heap queue holds ARRIVAL, IO_DONE and SLICE_END events, and all events at the same instant are processed before the next decision. Each process alternates CPU bursts and I/O waits. The engine owns the clock and the process control blocks but makes no decisions: it calls a policy interface (<code>select</code>, <code>time_slice</code>, <code>should_preempt</code> and event hooks). All policies therefore see identical arrivals, bursts, I/O times and a 0.1 ms context-switch cost, charged whenever the CPU moves to a different process. Only the engine and the oracle can read true remaining burst times.</p>
+
+<h3>B. Workload Model</h3>
+<p>Four process types are generated (Table I). Arrivals are Poisson, with the rate set so the offered CPU load is 85%. Six profiles of 200 processes are used: W1 CPU-bound, W2 I/O-bound, W3 interactive, W4 mixed (40% interactive, 30% CPU-bound, 20% I/O-bound, 10% phase-changing), W5 phase-changing, and W6, which is W4 at three times the arrival rate (overload).</p>
+
+<table>
+<caption>Table I<b>Process Types (Times in Milliseconds)</b></caption>
+<thead><tr><th>Type</th><th>CPU burst</th><th>Mean I/O</th><th>Bursts</th></tr></thead>
+<tbody>
+<tr><td>CPU-bound</td><td>lognormal, median 100</td><td>5</td><td>3–8</td></tr>
+<tr><td>I/O-bound</td><td>exponential, mean 2</td><td>30</td><td>20–60</td></tr>
+<tr><td>Interactive</td><td>exponential, mean 5</td><td>100</td><td>10–40</td></tr>
+<tr><td>Phase-changing</td><td>I/O-bound, then CPU-bound</td><td>—</td><td>10–30</td></tr>
+</tbody></table>
+
+<h3>C. Burst Predictor</h3>
+<p>Each process is described by twelve features, all of which a kernel already tracks: the last five burst lengths, the mean and standard deviation of past bursts, the exponential-average estimate itself (so the model can only add to it), the last and mean I/O wait, the number of completed bursts, and the last change in burst length. Features use only completed bursts, and a unit test confirms that changing a process's future does not change its features. Because features depend only on a process's own history, training data are built directly from 2,000 generated processes (45,389 bursts) from seeds never used in evaluation, split 75/25 <i>by process</i>. Selection rule: the lowest held-out mean absolute error (MAE) within a 1 ms latency budget, with ridge regression preferred if within 5%. Table II shows that gradient boosting on log(burst) wins. A logistic-regression classifier (macro-F1 0.94, against 0.94 for a random forest at 20× the latency) labels processes as CPU-bound, I/O-bound or interactive.</p>
+
+<table>
+<caption>Table II<b>Held-Out Prediction Error (ms) by Process Type</b></caption>
+<thead><tr><th>Model</th><th>MAE</th><th>CPU</th><th>I/O</th><th>Inter.</th><th>Phase</th></tr></thead>
+<tbody>
+<tr><td>Exponential avg.</td><td>12.36</td><td>60.1</td><td>1.91</td><td>4.38</td><td>31.5</td></tr>
+<tr><td>Ridge</td><td>14.82</td><td>54.9</td><td>5.89</td><td>5.86</td><td>34.2</td></tr>
+<tr><td>Ridge (log)</td><td>22.54</td><td>96.4</td><td>1.58</td><td>3.58</td><td>70.9</td></tr>
+<tr><td>Grad. boosting</td><td>12.59</td><td>53.1</td><td>3.59</td><td>4.76</td><td>30.5</td></tr>
+<tr class="ours"><td>Grad. boost. (log)</td><td>10.62</td><td>54.1</td><td>1.53</td><td>3.59</td><td>26.8</td></tr>
+</tbody></table>
+
+<p>A feedback loop compares every completed burst with its prediction, logs the error and stores the example in a rolling buffer. Every 2,000 new examples the model is refit on the offline data plus the buffer.</p>
+
+<h3>D. Adaptive Scheduler</h3>
+<p>Let b̂<sub>i</sub> be the predicted length of process <i>i</i>'s current burst, d<sub>i</sub> the CPU time it has already received in that burst, and w<sub>i</sub> the time it has waited since entering the ready queue. The estimated remaining time is r<sub>i</sub> = b̂<sub>i</sub> − d<sub>i</sub>, or b̂<sub>i</sub> if the burst has already outrun its prediction. The process with the lowest priority value runs next:</p>
+<div class="eq"><span>P<sub>i</sub> = r<sub>i</sub> − β w<sub>i</sub></span><span class="num">(1)</span></div>
+<p class="noind">With β = 0 this is exactly SJF on predicted bursts (verified slice by slice in a unit test). The ageing term guarantees that a long process eventually reaches the front. The value β = 0.03 was chosen on tuning seeds that are never used in evaluation. Every E = 50 decisions the quantum is recomputed from the predictions B̂ of bursts that became ready during the epoch, and the last 200 ratios ρ = actual/predicted:</p>
+<div class="eq"><span>q<sub>new</sub> = clamp(P<sub>p</sub>{ b̂ ρ : b̂ ∈ B̂, ρ ∈ R }, 1, 100)</span><span class="num">(2)</span></div>
+<div class="eq"><span>q ← γ q<sub>new</sub> + (1 − γ) q</span><span class="num">(3)</span></div>
+<p class="noind">with p = 80 and γ = 0.3. The ratios matter. A prediction is a conditional average, so predictions are far less dispersed than real bursts: for I/O-bound bursts with mean 2 ms, nearly every prediction is about 2 ms, yet 20% of real bursts exceed 3.2 ms. A first version that used raw predictions produced quanta that were too small on W2 and W3. Multiplying by observed error ratios restores the real spread, so the textbook 80% rule is applied to an estimate of the true burst distribution. Finally, the percentile is shifted by 10 × (fraction CPU-bound − fraction interactive) using the classifier, which favours responsiveness for interactive mixes and fewer switches for CPU-bound ones.</p>
+
+<h3>E. Baselines</h3>
+<p>The eleven configurations are: FCFS; SJF and preemptive SRTF, both with exponential averaging (α = 0.5, τ<sub>0</sub> = 10 ms); RR with quanta of 2, 5, 10 and 20 ms, so the proposal cannot win against a badly tuned quantum; MLFQ with three levels (4/8/16 ms) and a boost every 200 ms; an oracle, SRTF with true burst lengths; and our scheduler with exponential averaging (Adaptive-EMA) and with the learned model (Adaptive-ML). Adaptive-EMA isolates the contribution of the learned predictor from that of the scheduling mechanism.</p>
+
+<h2>IV. Experimental Methodology</h2>
+<p>Each of the 6 workloads is generated with 10 seeds, and every configuration runs on the same 60 instances (660 paired runs). For process <i>i</i> with arrival a<sub>i</sub>, completion c<sub>i</sub>, first dispatch s<sub>i</sub>, total CPU demand B<sub>i</sub> and I/O time IO<sub>i</sub>:</p>
+<div class="eq"><span>T<sub>i</sub> = c<sub>i</sub> − a<sub>i</sub>,&nbsp; W<sub>i</sub> = T<sub>i</sub> − B<sub>i</sub> − IO<sub>i</sub>,&nbsp; R<sub>i</sub> = s<sub>i</sub> − a<sub>i</sub></span><span class="num">(4)</span></div>
+<p class="noind">We report average and worst-case W, response R, context switches, utilisation, Jain's index [4] on each process's progress rate (B + IO)/T, the number of starved processes (W above five times the cross-policy mean), prediction MAE, and the share of the SJF-EMA-to-oracle gap that is closed, G = (W<sub>SJF</sub> − W<sub>ours</sub>)/(W<sub>SJF</sub> − W<sub>oracle</sub>). Seven hypotheses were stated before any experiment (Table IV). An improvement counts only if the mean paired improvement over seeds exceeds one standard deviation of the paired differences. Additional runs comprise an ablation on W4 and W5 (120 runs), sweeps of β, p and E on W4 (130 runs) and switch costs of 0.05, 0.1 and 0.5 ms (150 runs).</p>
+
+<h2>V. Results</h2>
+<h3>A. Simulator Verification</h3>
+<p>Before any learning, the engine was checked against hand-computed cases [1]: FCFS on bursts 24, 3, 3 gives exactly 17 ms, shortest-first 3 ms, RR with q = 4 gives 5.67 ms, and SRTF on bursts 8, 4, 9, 5 arriving at 0, 1, 2, 3 gives 6.5 ms (Fig. 1). Total CPU service is identical across all eleven policies, event times are monotonic, and all 37 unit tests pass.</p>
+
+<figure>
+<img src="../screenshots/demo_textbook.png" alt="Simulator output reproducing textbook results" style="width:85%;margin:0 auto">
+<figcaption>Fig. 1. Output of the demonstration program: Gantt charts and average waiting times for the textbook examples, each matching the expected value exactly.</figcaption>
+</figure>
+
+<h3>B. Waiting Time</h3>
+<p>Table III and Fig. 2 give average waiting time for every configuration. On the mixed workload W4, Adaptive-ML waits 1,786 ms against 2,460 ms for SJF-EMA, a 27.4% reduction. It is better on all ten seeds (mean paired improvement 674 ms, standard deviation 117 ms) and closes 54% of the gap to the oracle. On W1 and W5 the average is within 2% of SJF-EMA, and on W2, W3 and W6 it is 14%, 5% and 3% higher. Adaptive-ML beats Adaptive-EMA on four of six workloads (W1, W4, W5, W6).</p>
+</div>
+
+<div class="wide">
+<table style="font-size:8pt">
+<caption>Table III<b>Average Waiting Time (ms), Mean ± Standard Deviation over 10 Seeds</b></caption>
+<thead><tr><th>Scheduler</th><th>W1 CPU</th><th>W2 I/O</th><th>W3 interactive</th><th>W4 mixed</th><th>W5 phase</th><th>W6 overload</th></tr></thead>
+<tbody>
+<tr><td>FCFS</td><td>2,356 ± 1,467</td><td>454 ± 194</td><td>490 ± 155</td><td>4,003 ± 1,780</td><td>4,330 ± 1,433</td><td>38,210 ± 1,937</td></tr>
+<tr><td>SJF-EMA</td><td>2,778 ± 1,727</td><td>395 ± 143</td><td>480 ± 147</td><td>2,460 ± 791</td><td>6,269 ± 2,451</td><td>17,150 ± 1,801</td></tr>
+<tr><td>SRTF-EMA</td><td>2,881 ± 1,728</td><td>432 ± 154</td><td>489 ± 159</td><td>1,729 ± 720</td><td>6,830 ± 2,320</td><td>16,490 ± 1,747</td></tr>
+<tr><td>RR-2</td><td>3,478 ± 2,021</td><td>556 ± 245</td><td>608 ± 213</td><td>2,394 ± 1,069</td><td>7,675 ± 2,463</td><td>22,998 ± 2,097</td></tr>
+<tr><td>RR-5</td><td>2,931 ± 1,753</td><td>470 ± 203</td><td>523 ± 180</td><td>2,180 ± 989</td><td>6,576 ± 2,266</td><td>23,615 ± 2,096</td></tr>
+<tr><td>RR-10</td><td>2,755 ± 1,668</td><td>460 ± 198</td><td>498 ± 166</td><td>2,276 ± 1,047</td><td>6,127 ± 2,131</td><td>26,088 ± 2,204</td></tr>
+<tr><td>RR-20</td><td>2,661 ± 1,624</td><td>454 ± 194</td><td>488 ± 156</td><td>2,572 ± 1,210</td><td>5,713 ± 1,986</td><td>30,333 ± 2,389</td></tr>
+<tr><td>MLFQ</td><td>2,814 ± 1,733</td><td>503 ± 215</td><td>542 ± 187</td><td>1,878 ± 869</td><td>6,566 ± 2,340</td><td>22,762 ± 2,167</td></tr>
+<tr><td>Oracle</td><td>1,697 ± 930</td><td>370 ± 200</td><td>283 ± 113</td><td>1,204 ± 484</td><td>4,617 ± 1,590</td><td>12,820 ± 1,542</td></tr>
+<tr><td>Adaptive-EMA</td><td>2,915 ± 1,791</td><td>423 ± 169</td><td>487 ± 159</td><td>1,851 ± 752</td><td>6,569 ± 2,436</td><td>18,017 ± 1,914</td></tr>
+<tr class="ours"><td>Adaptive-ML</td><td>2,725 ± 1,692</td><td>450 ± 180</td><td>505 ± 182</td><td>1,786 ± 730</td><td>6,163 ± 2,235</td><td>17,599 ± 2,335</td></tr>
+</tbody></table>
+</div>
+
+<div class="cols">
+<figure class="wide" style="column-span:all">
+<img src="../../figures/fig1_avg_wait.png" alt="Average waiting time per workload and scheduler">
+<figcaption>Fig. 2. Average waiting time per workload (bars: mean of 10 seeds; lines: ±1 standard deviation). Adaptive-ML is blue, the main baseline SJF-EMA orange, and the oracle dark grey.</figcaption>
+</figure>
+
+<h3>C. Worst Case, Switches and Response</h3>
+<p>Ageing bounds starvation. Adaptive-ML's worst-case wait is lower than SJF-EMA's by 56% on W1, 27% on W3, 23% on W4 and 53% on W5, and lower than SRTF-EMA's on five of six workloads (not W2). On W5 the number of starved processes per run falls from 7.7 (SJF-EMA) to 0.2. On W4, Adaptive-ML performs 5,933 context switches against 15,328 for RR-5 (−61%) and 34,354 for RR-2, with an average response time of 15.4 ms, against 23.3 ms for RR-5 and 69.3 ms for RR-20. The cost is more switches than non-preemptive SJF-EMA (3,977). When the switch cost rises from 0.1 to 0.5 ms, Adaptive-ML's average wait on W4 grows by 20%, against 53% for MLFQ and 62% for RR-5.</p>
+
+<h3>D. Adaptation of the Quantum</h3>
+<p>Fig. 3 runs Adaptive-ML on a workload whose mix changes every 30 s. The quantum settles near 6 ms while interactive processes arrive, rises to the 100 ms cap for CPU-bound processes, and falls to about 3.5 ms for I/O-bound ones, close to the analytical 80th percentile of an exponential with mean 2 ms (3.2 ms). No fixed quantum suits all three phases. Across the main workloads the mean quantum was 92 ms (W1), 3.5 ms (W2), 6.4 ms (W3), 18 ms (W4), 95 ms (W5) and 14 ms (W6).</p>
+
+<figure>
+<img src="../../figures/fig4_quantum_over_time.png" alt="Quantum over time">
+<figcaption>Fig. 3. Time quantum of Adaptive-ML on a workload that changes from interactive to CPU-bound to I/O-bound processes. Dotted lines show fixed RR quanta.</figcaption>
+</figure>
+
+<figure>
+<img src="../../figures/fig5_prediction_example.png" alt="Prediction example" style="width:82%;margin:0 auto">
+<figcaption>Fig. 4. Predictions for one phase-changing process. After the first long burst the learned model jumps to about 95 ms, while exponential averaging predicts 31 ms.</figcaption>
+</figure>
+
+<h3>E. Hypotheses and Ablation</h3>
+<p>Table IV lists the verdicts. Table V switches off one component at a time. Removing ageing lowers the W4 average by 8% but raises its worst case by 26%; on W5 it leaves the average unchanged and doubles the worst case. Fixing the quantum at 10 ms barely changes W4 but raises the W5 average by 11% and worst case by 52%. Using the learned prediction alone in non-preemptive SJF ("prediction only") improves on SJF-EMA by 5% on W4. Removing class modulation or online refitting changes the average wait by less than 3%.</p>
+
+<table>
+<caption>Table IV<b>Hypotheses Stated Before the Experiments</b></caption>
+<thead><tr><th>Hypothesis</th><th style="text-align:left">Verdict</th></tr></thead>
+<tbody>
+<tr><td>H1 Lower avg. wait than SJF-EMA on W4–W6</td><td style="text-align:left">Partly (W4 only)</td></tr>
+<tr><td>H2 Far fewer switches than small-q RR</td><td style="text-align:left">Supported</td></tr>
+<tr><td>H3 Lower worst wait than SJF/SRTF-EMA</td><td style="text-align:left">Partly (5 of 6)</td></tr>
+<tr><td>H4 ≈ SJF-EMA on W1, W2 (±10%)</td><td style="text-align:left">Partly (W1 only)</td></tr>
+<tr><td>H5 Never beats the oracle</td><td style="text-align:left">Supported (0/60)</td></tr>
+<tr><td>H6 Lower MAE than exp. averaging</td><td style="text-align:left">Supported (6 of 6)</td></tr>
+<tr><td>H7 No ageing: lower avg., higher worst</td><td style="text-align:left">Partly (W4 only)</td></tr>
+</tbody></table>
+
+<table>
+<caption>Table V<b>Ablation of Adaptive-ML (ms, Mean of 10 Seeds)</b></caption>
+<thead><tr><th>Variant</th><th>W4 avg</th><th>W4 worst</th><th>W5 avg</th><th>W5 worst</th></tr></thead>
+<tbody>
+<tr class="ours"><td>Full</td><td>1,786</td><td>18,388</td><td>6,163</td><td>25,831</td></tr>
+<tr><td>No ageing</td><td>1,643</td><td>23,182</td><td>6,196</td><td>53,915</td></tr>
+<tr><td>Fixed quantum</td><td>1,763</td><td>20,138</td><td>6,864</td><td>39,254</td></tr>
+<tr><td>No class modulation</td><td>1,807</td><td>18,898</td><td>6,238</td><td>27,875</td></tr>
+<tr><td>No online refit</td><td>1,833</td><td>17,766</td><td>6,134</td><td>25,482</td></tr>
+<tr><td>Prediction only</td><td>2,336</td><td>22,759</td><td>6,325</td><td>53,593</td></tr>
+<tr><td><i>SJF-EMA</i></td><td>2,460</td><td>23,766</td><td>6,269</td><td>55,480</td></tr>
+</tbody></table>
+
+<h2>VI. Discussion</h2>
+<p><i>Where it helps.</i> The gains appear where there is heterogeneity to exploit: the mixed workload, where short interactive bursts compete with long CPU-bound ones. Most of the benefit comes from <i>how</i> the prediction is used (ordering, ageing and quantum together). Better prediction accuracy alone yields only a modest gain.</p>
+<p><i>Where it does not.</i> On W2 and W3 the bursts are short and exponentially distributed, so they are essentially unpredictable beyond their mean, and preempting at a 3–6 ms quantum adds switching overhead without improving the order. Under overload (W6) waits reach tens of seconds, so the linear ageing term dominates and the order drifts towards FCFS. A wait-normalised ageing term is a natural refinement.</p>
+<p><i>The oracle is not a lower bound.</i> SRTF with true burst lengths is optimal for single-burst jobs, but not when processes have many bursts. On W5 plain FCFS (4,330 ms) beats the oracle (4,617 ms), because serving the shortest burst first repeatedly starves processes in their long phase. The oracle-gap metric should therefore be read as a reference for burst ordering, not as an absolute floor.</p>
+<p><i>Limitations.</i> The study is simulation-only, with one CPU and no cache or memory effects. Workloads are synthetic, and the model is trained on the same generator (with disjoint seeds and processes), so it says nothing about distribution shift. This is also why online refitting showed no benefit. A prediction takes about 0.5 ms in Python, far above what a kernel can afford. A deployable version would need a much smaller model, such as a shallow tree or lookup table.</p>
+
+<h2>VII. Conclusion</h2>
+<p>We showed that using a learned burst prediction twice, to order the ready queue with ageing and to size the quantum from an error-aware percentile of predicted bursts, reduces average waiting time on a mixed workload by 27% relative to SJF with exponential averaging. It also cuts worst-case waiting and context switches, while performing no better, or slightly worse, on uniform workloads of short random bursts. Future work will evaluate the scheduler on traced real workloads and port the quantum controller to a teaching kernel such as xv6. The simulator, models, experiment scripts and all raw results are included with the project for reproduction.</p>
+
+<h2>References</h2>
+<div class="refs">
+<div><span>[1]</span><span>A. Silberschatz, P. B. Galvin, and G. Gagne, <i>Operating System Concepts</i>, 10th ed. Hoboken, NJ, USA: Wiley, 2018, ch. 5.</span></div>
+<div><span>[2]</span><span>A. S. Tanenbaum and H. Bos, <i>Modern Operating Systems</i>, 4th ed. Boston, MA, USA: Pearson, 2014.</span></div>
+<div><span>[3]</span><span>R. H. Arpaci-Dusseau and A. C. Arpaci-Dusseau, <i>Operating Systems: Three Easy Pieces</i>, v1.00. Arpaci-Dusseau Books, 2018, chs. 7–8.</span></div>
+<div><span>[4]</span><span>R. Jain, D. Chiu, and W. Hawe, “A quantitative measure of fairness and discrimination for resource allocation in shared computer systems,” Digital Equipment Corp., Tech. Rep. DEC-TR-301, 1984.</span></div>
+<div><span>[5]</span><span>F. Pedregosa <i>et al.</i>, “Scikit-learn: Machine learning in Python,” <i>J. Mach. Learn. Res.</i>, vol. 12, pp. 2825–2830, 2011.</span></div>
+<div><span>[6]</span><span>Linux Kernel Documentation, “CFS scheduler.” [Online]. Available: https://docs.kernel.org/scheduler/sched-design-CFS.html</span></div>
+<div><span>[7]</span><span>F. J. Corbató, M. Merwin-Daggett, and R. C. Daley, “An experimental time-sharing system,” in <i>Proc. Spring Joint Comput. Conf. (AFIPS)</i>, 1962, pp. 335–344.</span></div>
+<div><span>[8]</span><span>W. Smith, I. Foster, and V. Taylor, “Predicting application run times using historical information,” in <i>Job Scheduling Strategies for Parallel Processing</i>, LNCS vol. 1459. Berlin, Germany: Springer, 1998, pp. 122–142.</span></div>
+<div><span>[9]</span><span>D. Tsafrir, Y. Etsion, and D. G. Feitelson, “Backfilling using system-generated predictions rather than user runtime estimates,” <i>IEEE Trans. Parallel Distrib. Syst.</i>, vol. 18, no. 6, pp. 789–803, Jun. 2007.</span></div>
+<div><span>[10]</span><span>J. H. Friedman, “Greedy function approximation: A gradient boosting machine,” <i>Ann. Statist.</i>, vol. 29, no. 5, pp. 1189–1232, 2001.</span></div>
+</div>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Project Review: Adaptive CPU Scheduling</title>
+<style>
+  @page { size: A4; margin: 15mm 16mm 15mm 16mm; }
+  * { box-sizing: border-box; }
+  body { font-family: "Helvetica Neue", Arial, sans-serif; font-size: 9.6pt; line-height: 1.38; color: #1b1f27; margin: 0; }
+  h1 { font-size: 17pt; margin: 0 0 2pt; color: #13233A; }
+  .sub { font-size: 10pt; color: #4a5568; margin: 0 0 3pt; }
+  .authors { font-size: 9.5pt; color: #1b1f27; margin: 0 0 8pt; padding-bottom: 6pt; border-bottom: 1.5pt solid #2A78D6; }
+  h2 { font-size: 11pt; color: #13233A; margin: 9pt 0 3pt; border-bottom: 0.5pt solid #d5d8de; padding-bottom: 1.5pt; }
+  p { margin: 0 0 4.5pt; text-align: justify; }
+  ul { margin: 0 0 4.5pt 14pt; padding: 0; }
+  li { margin: 0 0 1.5pt; }
+  code, .mono { font-family: Menlo, monospace; font-size: 8.6pt; }
+  .eq { font-family: Menlo, monospace; font-size: 8.6pt; background: #f2f4f7; padding: 3pt 6pt; margin: 2pt 0 5pt; border-left: 2.5pt solid #2A78D6; }
+  table { border-collapse: collapse; width: 100%; font-size: 8.6pt; margin: 2pt 0 6pt; }
+  th, td { border-bottom: 0.5pt solid #d5d8de; padding: 2pt 4pt; text-align: left; }
+  th { background: #eef1f5; font-weight: 600; }
+  td.n, th.n { text-align: right; white-space: nowrap; }
+  tr.hl td { background: #eaf2fc; font-weight: 600; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10pt; align-items: start; }
+  figure { margin: 2pt 0 6pt; }
+  figure img { width: 100%; display: block; border: 0.5pt solid #d5d8de; }
+  figcaption { font-size: 8pt; color: #4a5568; margin-top: 2pt; }
+  .box { background: #f6f7f9; border: 0.5pt solid #d5d8de; padding: 5pt 7pt; margin: 3pt 0 6pt; }
+  .avoid { break-inside: avoid; }
+</style>
+</head>
+<body>
+
+<h1>Adaptive CPU Scheduling Using Predicted Burst Lengths</h1>
+<p class="sub">Operating Systems · B.Tech CSE, Third Year · Project Review</p>
+<p class="authors">Shivaansh Aggarwal (24BCE0883) · Devansh Sharma (24BCE0717)</p>
+
+<h2>1. Problem</h2>
+<p>The CPU scheduler decides which ready process runs next and for how long. The classical policies are static. <b>FCFS</b> ignores burst length, so one long job delays every short one behind it (bursts 24, 3, 3 give a 17 ms average wait). <b>SJF</b> is optimal for average waiting time (3 ms on the same jobs), but needs the length of the next CPU burst, which is unknown when the decision is made. <b>Round Robin</b> uses a quantum fixed at configuration time: small quanta cause many context switches, large ones make the system sluggish. Real systems estimate bursts with exponential averaging, <span class="mono">τ(n+1) = α·t(n) + (1−α)·τ(n)</span>, which uses only one process's own history and lags after a phase change (bursts 2, 2, 2, 2, 60, 60, 60 give guesses 2, 31, 45.5, 52.75).</p>
+
+<h2>2. Objectives</h2>
+<ul>
+  <li>Build a single-CPU discrete-event simulator and verify it against textbook results.</li>
+  <li>Implement FCFS, SJF, SRTF, Round Robin, MLFQ and an oracle as baselines.</li>
+  <li>Train a model that predicts a process's next CPU burst from its past behaviour.</li>
+  <li>Use the prediction to order the ready queue and to resize the time quantum while the system runs.</li>
+  <li>Compare everything fairly across workload types and report honestly where it helps and where it does not.</li>
+</ul>
+
+<h2>3. Approach</h2>
+<p><b>Simulator.</b> A Python event-driven engine (<code>heapq</code> event queue; events ARRIVAL, IO_DONE, SLICE_END) owns the clock and the process control blocks but makes no decisions. It calls a pluggable policy, so every scheduler sees identical arrivals, bursts, I/O times and a 0.1 ms context-switch cost. Only the engine and the oracle can see true burst lengths.</p>
+<p><b>Predictor.</b> Twelve features per process, all information a kernel already keeps: the last five bursts, the mean and standard deviation of past bursts, the exponential-average estimate, the last and mean I/O wait, bursts completed, and the last change in burst length. Four regressors were compared on 2,000 training processes, split by process to avoid leakage. Gradient boosting on log(burst) won: MAE 10.6 ms vs 12.4 ms for exponential averaging (14% lower), 0.5 ms per prediction. A logistic-regression classifier (macro-F1 0.94) labels processes as CPU-bound, I/O-bound or interactive.</p>
+<p><b>Adaptive scheduler.</b> The prediction is used twice:</p>
+<div class="eq">Order:&nbsp;&nbsp; P = predicted time left − β × time waited&nbsp;&nbsp;&nbsp;(lowest P runs next, β = 0.03)<br>
+Quantum: q<sub>new</sub> = clamp(P80(prediction × actual/predicted ratio), 1 ms, 100 ms)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; q ← 0.3·q<sub>new</sub> + 0.7·q, every 50 scheduling decisions</div>
+<p>The ageing term prevents starvation. The quantum rule automates the textbook guideline that about 80% of bursts should finish within one quantum. Error ratios are needed because predictions are averages and are much less spread out than real bursts. The percentile is lowered when the classifier sees mostly interactive processes and raised when it sees mostly CPU-bound ones. A feedback loop logs each burst's error and periodically refits the model.</p>
+
+<h2>4. Implementation and verification</h2>
+<p>About 2,400 lines of Python (NumPy, pandas, scikit-learn, Matplotlib). Modules: <code>workload</code>, <code>engine</code>, <code>baselines</code>, <code>features</code>, <code>predictor</code>, <code>quantum</code>, <code>adaptive</code>, <code>metrics</code>. All <b>37 unit tests pass</b>. They cover the textbook examples, context-switch and I/O accounting, identical total CPU service across all schedulers, monotonic event times, the exponential-average values (6, 4, 6 → 8, 6, 6), a no-leakage check on features, the ageing example (50 − 0.1 × 400 = 10), the quantum percentile (8.4), and β = 0 reproducing SJF slice for slice.</p>
+
+<div class="grid2 avoid">
+<figure><img src="../screenshots/demo_textbook.png" alt="Demo output: textbook checks"><figcaption>Fig. 1. Real output of <code>python demo.py</code>: the simulator reproduces FCFS 17, SJF 3, RR(q=4) 5.67 and SRTF 6.5 ms exactly.</figcaption></figure>
+<figure><img src="../../figures/fig4_quantum_over_time.png" alt="Quantum over time"><figcaption>Fig. 2. The adaptive quantum follows a changing workload: about 6 ms (interactive), 100 ms (CPU-bound), 3.5 ms (I/O-bound).</figcaption></figure>
+</div>
+
+<h2>5. Experimental setup</h2>
+<p>Six workloads of 200 processes with Poisson arrivals at 85% CPU load: W1 CPU-bound, W2 I/O-bound, W3 interactive, W4 mixed (40/30/20/10% interactive/CPU/I/O/phase-changing), W5 phase-changing, W6 = W4 at 3× arrival rate. Eleven schedulers: FCFS, SJF-EMA, SRTF-EMA, RR at 2, 5, 10 and 20 ms, MLFQ (4/8/16 ms, boost every 200 ms), Oracle (SRTF with true bursts), Adaptive-EMA and Adaptive-ML. That makes 6 × 11 × 10 seeds = <b>660 paired runs</b>, plus 120 ablation, 130 sweep and 150 switch-cost runs. Metrics: waiting, turnaround and response time, worst-case wait, context switches, utilisation, Jain fairness, starvation count and prediction error.</p>
+
+<h2>6. Results</h2>
+<table class="avoid">
+<tr><th>Avg wait (ms), mean of 10 seeds</th><th class="n">W1</th><th class="n">W2</th><th class="n">W3</th><th class="n">W4</th><th class="n">W5</th><th class="n">W6</th></tr>
+<tr><td>FCFS</td><td class="n">2,356</td><td class="n">454</td><td class="n">490</td><td class="n">4,003</td><td class="n">4,330</td><td class="n">38,210</td></tr>
+<tr><td>SJF-EMA (main baseline)</td><td class="n">2,778</td><td class="n">395</td><td class="n">480</td><td class="n">2,460</td><td class="n">6,269</td><td class="n">17,150</td></tr>
+<tr><td>RR-5</td><td class="n">2,931</td><td class="n">470</td><td class="n">523</td><td class="n">2,180</td><td class="n">6,576</td><td class="n">23,615</td></tr>
+<tr><td>RR-20</td><td class="n">2,661</td><td class="n">454</td><td class="n">488</td><td class="n">2,572</td><td class="n">5,713</td><td class="n">30,333</td></tr>
+<tr><td>MLFQ</td><td class="n">2,814</td><td class="n">503</td><td class="n">542</td><td class="n">1,878</td><td class="n">6,566</td><td class="n">22,762</td></tr>
+<tr><td>Oracle (true bursts)</td><td class="n">1,697</td><td class="n">370</td><td class="n">283</td><td class="n">1,204</td><td class="n">4,617</td><td class="n">12,820</td></tr>
+<tr class="hl"><td>Adaptive-ML (ours)</td><td class="n">2,725</td><td class="n">450</td><td class="n">505</td><td class="n">1,786</td><td class="n">6,163</td><td class="n">17,599</td></tr>
+<tr><td>Ours vs SJF-EMA: avg / worst wait</td><td class="n">−2% / −56%</td><td class="n">+14% / +1%</td><td class="n">+5% / −27%</td><td class="n">−27% / −23%</td><td class="n">−2% / −53%</td><td class="n">+3% / −2%</td></tr>
+</table>
+<p>On the <b>mixed workload W4</b> Adaptive-ML waits 27% less than SJF-EMA and is better on all 10 seeds. It closes 54% of the gap to the oracle, cuts worst-case wait by 23%, and uses 61% fewer context switches than RR-5 (5,933 vs 15,328) while responding faster than RR-20 (15 vs 69 ms). Ageing roughly halves the worst-case wait on W1 and W5, and starved processes on W5 fall from 8.0 to 0.2 per run. The learned predictor is 12–22% more accurate than exponential averaging on every workload. The method loses on the all-I/O workload (+14%): bursts there are tiny and random, so there is nothing to predict beyond the mean, and preempting at a small quantum adds switches.</p>
+
+<table class="avoid">
+<tr><th>Hypothesis (stated before the experiments)</th><th>Verdict</th></tr>
+<tr><td>H1 Lower average wait than SJF-EMA on W4, W5, W6</td><td>Partly: clearly on W4; W5 and W6 within noise</td></tr>
+<tr><td>H2 Far fewer switches than small-quantum RR without slow response</td><td>Supported</td></tr>
+<tr><td>H3 Lower worst-case wait than SJF-EMA and SRTF-EMA</td><td>Partly: 5 of 6 workloads (not W2)</td></tr>
+<tr><td>H4 About equal to SJF-EMA on uniform W1, W2</td><td>Partly: W1 yes (−2%), W2 no (+14%)</td></tr>
+<tr><td>H5 Never beats the oracle</td><td>Supported (0 of 60 instances)</td></tr>
+<tr><td>H6 Learned model more accurate than exponential averaging</td><td>Supported on all 6 workloads</td></tr>
+<tr><td>H7 Removing ageing lowers average but raises worst-case wait</td><td>Partly: W4 yes; on W5 only the worst case changes (it doubles)</td></tr>
+</table>
+
+<h2>7. Ablation and key insights</h2>
+<ul>
+  <li><b>Ageing</b> is what controls the worst case: removing it doubles W5's worst-case wait (25.8 s → 53.9 s).</li>
+  <li><b>The adaptive quantum</b> matters most when bursts are long: fixing it at 10 ms on W5 raises average wait by 11% and worst-case wait by 52%.</li>
+  <li><b>Better prediction alone</b> (ML-predicted SJF) gains only 5% on W4. Most of the benefit comes from using the prediction both for ordering and for the quantum.</li>
+  <li><b>Online refit</b> made no measurable difference, as expected when training and test data come from the same generator.</li>
+  <li><b>The oracle is not a lower bound</b> for multi-burst processes: on W5 plain FCFS beats it, because shortest-burst-first starves some processes.</li>
+</ul>
+
+<h2>8. Changes from Review 1, limitations and next steps</h2>
+<p>An eleventh configuration (Adaptive-EMA) was added, so the planned 660 runs are now exact. The oracle is defined as preemptive SRTF with true bursts. β = 0.03 was tuned on separate seeds (100–102). The quantum uses prediction × error ratio. The optional <code>/proc</code> trace was dropped because macOS has no <code>/proc</code>. <b>Limitations:</b> simulation only (single CPU, no caches); synthetic workloads; 0.5 ms prediction latency is too slow for a kernel, so a real implementation would need a much smaller model. <b>Next:</b> test on traced real workloads and port the quantum controller to a teaching kernel such as xv6.</p>
+
+<div class="box avoid"><b>How to run</b> (Python 3.10+): <code>python3 -m venv .venv &amp;&amp; source .venv/bin/activate &amp;&amp; pip install -r requirements.txt</code>, then <code>pytest</code> (tests), <code>python demo.py</code> (10-second live demo), <code>python run_experiments.py</code> and <code>python analyse.py</code> (full results in <code>results/REPORT.md</code>, figures in <code>figures/</code>).</div>
+
+</body>
+</html>

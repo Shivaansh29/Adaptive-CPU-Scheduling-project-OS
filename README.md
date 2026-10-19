@@ -54,6 +54,18 @@ Then run these in order (the times are for a 10-core laptop):
 3. `figures/fig1_avg_wait.png` and `results/REPORT.md`: the full results and
    the verdict on every hypothesis.
 
+## Documents for submission
+
+| File | What it is |
+|---|---|
+| `docs/project_review.pdf` | 3-page project review |
+| `docs/ieee_paper.pdf` | final paper in IEEE conference format (5 pages) |
+| `docs/screenshots/*.png` | real program output rendered as terminal screenshots |
+| Slide deck | 6 slides with speaker notes (link shared separately; download it as PowerPoint or PDF from its page) |
+
+To regenerate them after changing the code: `python make_screenshots.py` (screenshots) and
+`sh docs/build_pdfs.sh` (PDFs, built from `docs/src/*.html` with Google Chrome).
+
 ---
 
 ## Project structure
@@ -76,6 +88,8 @@ ai_cpu_scheduler/
 ├── run_experiments.py      runs the experiment matrix in parallel, writes results/*.csv
 ├── analyse.py              tables, hypothesis verdicts, figures
 ├── demo.py                 live terminal demo
+├── make_screenshots.py     renders real program output as PNG screenshots
+├── docs/                   review PDF, IEEE paper PDF, their HTML sources, screenshots
 ├── models/                 trained models (created by train_models.py)
 ├── results/                raw CSVs, REPORT.md, model_report.json
 └── figures/                PNG figures for the report and slides
