@@ -1,6 +1,7 @@
 # Adaptive CPU Scheduling Using Predicted Burst Lengths
 
 Operating Systems project · B.Tech CSE, Third Year
+
 Shivaansh Aggarwal (24BCE0883) · Devansh Sharma (24BCE0717)
 
 A CPU scheduler that **guesses how long each process will run next** (with a
