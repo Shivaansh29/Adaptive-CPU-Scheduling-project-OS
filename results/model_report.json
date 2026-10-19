@@ -1,0 +1,68 @@
+{
+  "dataset": {
+    "processes": 2000,
+    "bursts": 45389,
+    "train_processes": 1500,
+    "test_processes": 500
+  },
+  "regressors": {
+    "Exponential averaging": {
+      "mae": 12.362183135069087,
+      "rmse": 32.232747832949244,
+      "mae_cpu": 60.0718927190809,
+      "mae_io": 1.9148450193536826,
+      "mae_interactive": 4.377202200566565,
+      "mae_phase": 31.494717123157873,
+      "latency_ms": 0.0
+    },
+    "Ridge": {
+      "mae": 14.823201119253147,
+      "rmse": 31.196781363745117,
+      "mae_cpu": 54.85230530840488,
+      "mae_io": 5.893450687747018,
+      "mae_interactive": 5.8617797703375345,
+      "mae_phase": 34.21391686495517,
+      "latency_ms": 0.08007319333652656
+    },
+    "Ridge (log target)": {
+      "mae": 22.543217534085805,
+      "rmse": 169.95061387057032,
+      "mae_cpu": 96.42987315751857,
+      "mae_io": 1.582737268160162,
+      "mae_interactive": 3.575209283057605,
+      "mae_phase": 70.86224103128899,
+      "latency_ms": 0.0821220832100759
+    },
+    "Gradient boosting": {
+      "mae": 12.590598571321546,
+      "rmse": 29.11553955865565,
+      "mae_cpu": 53.08419874960902,
+      "mae_io": 3.5918849878895855,
+      "mae_interactive": 4.75874845290699,
+      "mae_phase": 30.50002412136284,
+      "latency_ms": 0.5029240266109506
+    },
+    "Gradient boosting (log target)": {
+      "mae": 10.622710857935461,
+      "rmse": 29.235762387298287,
+      "mae_cpu": 54.10497893207706,
+      "mae_io": 1.5251362225461491,
+      "mae_interactive": 3.594987421122325,
+      "mae_phase": 26.84723973878407,
+      "latency_ms": 0.5016172234900296
+    }
+  },
+  "chosen_regressor": "Gradient boosting (log target)",
+  "beats_ema": true,
+  "classifiers": {
+    "Logistic regression": {
+      "macro_f1": 0.9386308354552279,
+      "latency_ms": 0.09976207977160811
+    },
+    "Random forest": {
+      "macro_f1": 0.9416190790332007,
+      "latency_ms": 2.161442079814151
+    }
+  },
+  "chosen_classifier": "Logistic regression"
+}

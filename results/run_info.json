@@ -1,0 +1,36 @@
+{
+  "seeds": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9
+  ],
+  "processes_per_run": 200,
+  "quick": false,
+  "main_runs": 660,
+  "ablation_runs": 120,
+  "sweep_runs": 130,
+  "switch_cost_runs": 150,
+  "adaptive_defaults": {
+    "beta": 0.03,
+    "p": 80,
+    "epoch": 50,
+    "gamma": 0.3,
+    "q_min": 1.0,
+    "q_max": 100.0,
+    "q_init": 10.0,
+    "adaptive_quantum": true,
+    "class_mod": true,
+    "use_quantum": true,
+    "online": true
+  },
+  "wall_seconds": 271.4,
+  "python": "3.14.6",
+  "machine": "macOS-15.5-arm64-arm-64bit-Mach-O"
+}
