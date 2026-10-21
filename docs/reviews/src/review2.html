@@ -46,7 +46,7 @@
   <tr><td>Interactive</td><td>Exponential, mean 5</td><td>100</td><td>10&ndash;40</td></tr>
   <tr><td>Phase-changing</td><td>I/O-bound first half, CPU-bound second half</td><td>as per phase</td><td>10&ndash;30</td></tr>
 </table>
-<p>Processes arrive according to a Poisson process, with the arrival rate set so that the CPU is about 85% loaded. Six workload profiles of 200 processes each are used: W1 (all CPU-bound), W2 (all I/O-bound), W3 (all interactive), W4 (mixed: 40% interactive, 30% CPU-bound, 20% I/O-bound, 10% phase-changing), W5 (all phase-changing) and W6 (W4 with three times the arrival rate, to overload the system). Every workload is generated from a random seed, so it can be reproduced exactly.</p>
+<p>Processes arrive according to a Poisson process, with the arrival rate set so that the offered CPU load (arrival rate &times; average CPU demand per process) is 85%. Six workload profiles of 200 processes each are used: W1 (all CPU-bound), W2 (all I/O-bound), W3 (all interactive), W4 (mixed: 40% interactive, 30% CPU-bound, 20% I/O-bound, 10% phase-changing), W5 (all phase-changing) and W6 (W4 with three times the arrival rate, to overload the system). Every workload is generated from a random seed, so it can be reproduced exactly.</p>
 
 <h3>1.3 Simulation engine</h3>
 <p>The simulator is event-driven. A priority queue holds three kinds of events: a process arriving, a process finishing its I/O, and a CPU time slice ending. When the CPU becomes free, the engine asks the current scheduling policy which ready process to run and for how long. The engine itself never makes a scheduling decision. Because of this separation, all eleven schedulers compared in this project run on exactly the same arrivals, burst lengths, I/O times and context-switch cost (0.1 ms per switch), and the only thing that differs between runs is the policy. Only the engine and the oracle can see the true length of a burst; every other policy has to work with estimates.</p>
@@ -63,16 +63,18 @@
   <tr><td>Bursts completed</td><td>How far the process is into its life</td></tr>
   <tr><td>Last change</td><td>Difference between the last two bursts</td></tr>
 </table>
-<p>The training data comes from 2,000 generated processes (45,389 bursts) created with random seeds that are never used in the experiments. It was split into training and test sets <i>by process</i> rather than by row, so that bursts from the same process never appear on both sides. Four regression models were compared with exponential averaging on the held-out processes, and the rule was to choose the lowest mean absolute error (MAE) within a latency budget of 1 ms per prediction. Gradient boosting trained on the logarithm of the burst length gave the lowest error, 10.6 ms against 12.4 ms for exponential averaging, and it was more accurate for every process type (Table 3). A logistic regression classifier (macro-F1 score 0.94) is also trained to label each process as CPU-bound, I/O-bound or interactive.</p>
-<p class="tcaption">Table 3. Prediction error on held-out processes (MAE in ms)</p>
+<p>The training data comes from 2,000 generated processes (45,389 bursts) created with random seeds (1000 to 1004) that are never used in the experiments. It was split 75/25 (1,500 and 500 processes) into training and test sets <i>by process</i> rather than by row, so that bursts from the same process never appear on both sides. Four regression models, Ridge regression and gradient boosting [1], each trained on the raw burst length and on its logarithm, were compared with exponential averaging on the held-out processes. The rule was to choose the lowest mean absolute error (MAE) within a latency budget of 1 ms per prediction, and to prefer Ridge if its error was within 5% of the best. Gradient boosting trained on the logarithm of the burst length gave the lowest error, 10.6 ms against 12.4 ms for exponential averaging, and it was more accurate for every process type (Table 3). A logistic regression classifier (macro-F1 score 0.94) is also trained to label each process as CPU-bound, I/O-bound or interactive.</p>
+<p class="tcaption">Table 3. Prediction error on held-out processes (MAE in ms) and time per prediction</p>
 <table>
-  <tr><th>Model</th><th class="n">Overall</th><th class="n">CPU-bound</th><th class="n">I/O-bound</th><th class="n">Interactive</th><th class="n">Phase-changing</th></tr>
-  <tr><td>Exponential averaging</td><td class="n">12.36</td><td class="n">60.1</td><td class="n">1.91</td><td class="n">4.38</td><td class="n">31.5</td></tr>
-  <tr><td>Ridge regression</td><td class="n">14.82</td><td class="n">54.9</td><td class="n">5.89</td><td class="n">5.86</td><td class="n">34.2</td></tr>
-  <tr><td>Gradient boosting</td><td class="n">12.59</td><td class="n">53.1</td><td class="n">3.59</td><td class="n">4.76</td><td class="n">30.5</td></tr>
-  <tr><td><b>Gradient boosting (log target)</b></td><td class="n"><b>10.62</b></td><td class="n"><b>54.1</b></td><td class="n"><b>1.53</b></td><td class="n"><b>3.59</b></td><td class="n"><b>26.8</b></td></tr>
+  <tr><th style="width:27%">Model</th><th class="n">Overall</th><th class="n">CPU-bound</th><th class="n">I/O-bound</th><th class="n">Interactive</th><th class="n">Phase-chg.</th><th class="n">Time (ms)</th></tr>
+  <tr><td>Exp. averaging</td><td class="n">12.362</td><td class="n">60.072</td><td class="n">1.915</td><td class="n">4.377</td><td class="n">31.495</td><td class="n">&ndash;</td></tr>
+  <tr><td>Ridge</td><td class="n">14.823</td><td class="n">54.852</td><td class="n">5.893</td><td class="n">5.862</td><td class="n">34.214</td><td class="n">0.08</td></tr>
+  <tr><td>Ridge (log target)</td><td class="n">22.543</td><td class="n">96.430</td><td class="n">1.583</td><td class="n">3.575</td><td class="n">70.862</td><td class="n">0.08</td></tr>
+  <tr><td>Gradient boosting</td><td class="n">12.591</td><td class="n">53.084</td><td class="n">3.592</td><td class="n">4.759</td><td class="n">30.500</td><td class="n">0.50</td></tr>
+  <tr><td><b>Grad. boosting (log target)</b></td><td class="n"><b>10.623</b></td><td class="n"><b>54.105</b></td><td class="n"><b>1.525</b></td><td class="n"><b>3.595</b></td><td class="n"><b>26.847</b></td><td class="n"><b>0.50</b></td></tr>
 </table>
-<p>The model also has a feedback loop. Whenever a burst finishes, its actual length is compared with the prediction, the error is recorded, and the burst is stored as a new training example. After every 2,000 new examples the model is refitted on the original training data plus these new examples.</p>
+<p>Values are from the saved model report (results/model_report.json) and are the same as those printed by the training script in Fig. 4. Ridge on the log target does well on short bursts but makes very large errors on some long ones (an RMSE of 170 ms, against 29 to 32 ms for the others), which gives it the highest overall error. Ridge was not within 5% of the best, so gradient boosting on the log target was chosen.</p>
+<p>The model also has a feedback loop. Whenever a burst finishes, its actual length is compared with the prediction, the error is recorded, and the burst is stored as a new training example. After every 2,000 new examples the model is refitted on a 10,000-row sample of the offline training data plus the most recent 4,000 examples.</p>
 
 <h3>1.5 Ordering the ready queue with ageing</h3>
 <p>When the CPU is free, every ready process <i>i</i> is given a priority value</p>
@@ -97,7 +99,7 @@
 </ol>
 
 <h3>1.8 Baseline algorithms implemented</h3>
-<p>To compare fairly, the following existing algorithms were implemented in the same simulator: FCFS; SJF and SRTF using exponential averaging (&alpha; = 0.5); Round Robin with quanta of 2, 5, 10 and 20 ms; a multilevel feedback queue with three levels (quanta 4, 8 and 16 ms, priority boost every 200 ms); and an oracle, which is SRTF given the true burst lengths, as the best-case reference. A second version of the proposed scheduler that uses exponential averaging instead of the learned model (Adaptive-EMA) is also included, to separate the effect of the model from the effect of the scheduling method. With the proposed scheduler (Adaptive-ML), this gives eleven configurations.</p>
+<p>To compare fairly, the following existing algorithms were implemented in the same simulator: FCFS; SJF and SRTF using exponential averaging (&alpha; = 0.5); Round Robin with quanta of 2, 5, 10 and 20 ms; a multilevel feedback queue with three levels (quanta 4, 8 and 16 ms, priority boost every 200 ms); and an oracle, which is SRTF given the true burst lengths, as a reference policy that uses true burst lengths. A second version of the proposed scheduler that uses exponential averaging instead of the learned model (Adaptive-EMA) is also included, to separate the effect of the model from the effect of the scheduling method. With the proposed scheduler (Adaptive-ML), this gives eleven configurations.</p>
 
 <h2>2. System Architecture</h2>
 
@@ -209,13 +211,13 @@
 <img src="../../terminal/03_train.png" alt="Model training">
 <figcaption>Fig. 4. Training and comparing the prediction models</figcaption>
 </figure>
-<p>The training script builds the dataset, splits it by process, compares the regression models against exponential averaging and selects gradient boosting on log burst length. It then compares the two classifiers and picks logistic regression, which is almost as accurate as the random forest but more than twenty times faster.</p>
+<p>The training script builds the dataset, splits it by process, compares the regression models against exponential averaging and selects gradient boosting on log burst length. It then compares the two classifiers and picks logistic regression, which is almost as accurate as the random forest but more than twenty times faster. The prediction times printed in this screenshot differ slightly from Table 3 because timing changes a little from run to run; the error values are identical.</p>
 
 <figure>
 <img src="../../terminal/04_demo_textbook.png" alt="Textbook verification">
 <figcaption>Fig. 5. Simulator output for the textbook examples, with Gantt charts</figcaption>
 </figure>
-<p>Before any learning was added, the simulator was checked against textbook examples [1]. FCFS on bursts of 24, 3 and 3 ms gives an average waiting time of exactly 17 ms, running the shortest first gives 3 ms, Round Robin with a quantum of 4 ms gives 5.67 ms, and SRTF on four processes arriving at 0, 1, 2 and 3 ms gives 6.5 ms.</p>
+<p>Before any learning was added, the simulator was checked against textbook examples [3]. FCFS on bursts of 24, 3 and 3 ms gives an average waiting time of exactly 17 ms, running the shortest first gives 3 ms, Round Robin with a quantum of 4 ms gives 5.67 ms, and SRTF on four processes arriving at 0, 1, 2 and 3 ms gives 6.5 ms.</p>
 
 <figure>
 <img src="../../terminal/05_demo_prediction.png" alt="Prediction comparison">
@@ -231,8 +233,9 @@
 
 <h2>References</h2>
 <div class="refs">
-<p>[1] A. Silberschatz, P. B. Galvin, and G. Gagne, <i>Operating System Concepts</i>, 10th ed. Hoboken, NJ, USA: Wiley, 2018, ch. 5.</p>
+<p>[1] J. H. Friedman, &ldquo;Greedy function approximation: A gradient boosting machine,&rdquo; <i>Annals of Statistics</i>, vol. 29, no. 5, pp. 1189&ndash;1232, 2001.</p>
 <p>[2] F. Pedregosa <i>et al.</i>, &ldquo;Scikit-learn: Machine learning in Python,&rdquo; <i>Journal of Machine Learning Research</i>, vol. 12, pp. 2825&ndash;2830, 2011.</p>
+<p>[3] A. Silberschatz, P. B. Galvin, and G. Gagne, <i>Operating System Concepts</i>, 10th ed. Hoboken, NJ, USA: Wiley, 2018, ch. 5.</p>
 </div>
 
 </body>

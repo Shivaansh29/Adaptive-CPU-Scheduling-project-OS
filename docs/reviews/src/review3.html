@@ -38,7 +38,7 @@
 <h3>1.2 Metrics</h3>
 <p>For a process <i>i</i> with arrival time a<sub>i</sub>, completion time c<sub>i</sub>, time of first execution s<sub>i</sub>, total CPU time B<sub>i</sub> and total I/O time IO<sub>i</sub>, the following are measured [1]:</p>
 <p class="eq">Turnaround T<sub>i</sub> = c<sub>i</sub> &minus; a<sub>i</sub> &nbsp;&nbsp;&nbsp; Waiting W<sub>i</sub> = T<sub>i</sub> &minus; B<sub>i</sub> &minus; IO<sub>i</sub> &nbsp;&nbsp;&nbsp; Response R<sub>i</sub> = s<sub>i</sub> &minus; a<sub>i</sub></p>
-<p>Along with the averages, the worst-case waiting time, the number of context switches, CPU utilisation, Jain's fairness index [2], the number of starved processes (those that waited more than five times the average wait of all schedulers on that workload) and the prediction error (MAE) are recorded. To show how close a scheduler gets to the best case, the share of the gap to the oracle that it closes is also computed:</p>
+<p>Along with the averages, the worst-case and 95th-percentile waiting time, the number of context switches, CPU utilisation, throughput (processes completed per second), Jain's fairness index [2] computed on each process's progress rate (B<sub>i</sub> + IO<sub>i</sub>) / T<sub>i</sub>, the number of starved processes (those that waited more than five times the average wait of all schedulers on that workload instance), and the prediction error (MAE and RMSE) and prediction time are recorded. To show how close a scheduler gets to the oracle (SRTF with true burst lengths), the share of the gap to the oracle that it closes is also computed:</p>
 <p class="eq">Gap closed = (W<sub>SJF-EMA</sub> &minus; W<sub>proposed</sub>) / (W<sub>SJF-EMA</sub> &minus; W<sub>oracle</sub>) &times; 100%</p>
 
 <h3>1.3 Choice of the ageing weight</h3>
@@ -77,17 +77,17 @@
 <p>Average waiting time hides processes that wait for a very long time. Thanks to the ageing term, the proposed scheduler lowers the worst case by 56% on W1, 27% on W3, 23% on W4 and 53% on W5, and on five of the six workloads it is better than both SJF-EMA and SRTF-EMA. On W5 the number of starved processes per run drops from 7.7 with SJF-EMA to 0.2.</p>
 
 <h3>2.3 Context switches and response time</h3>
-<p>Round Robin shows the usual trade-off on W4: a 2 ms quantum gives a fast first response but 34,354 context switches, while a 20 ms quantum cuts the switches to 6,542 but raises the average response time to 69 ms. The proposed scheduler needs 5,933 switches, 61% fewer than RR with a 5 ms quantum, and has an average response time of 15 ms, so it does not have to give up responsiveness to save switches. When the cost of a context switch was raised from 0.1 ms to 0.5 ms, its average waiting time on W4 grew by 20%, compared with 53% for MLFQ and 62% for RR with a 5 ms quantum.</p>
+<p>All figures in this subsection are averages over the ten seeds. Round Robin shows the usual trade-off on W4: a 2 ms quantum gives a fast first response but 34,354 context switches per run, while a 20 ms quantum cuts the switches to 6,542 but raises the average response time to 69 ms. The proposed scheduler needs 5,933 switches, 61% fewer than RR with a 5 ms quantum, and has an average response time of 15 ms, so it does not have to give up responsiveness to save switches. When the cost of a context switch was raised from 0.1 ms to 0.5 ms, its average waiting time on W4 grew by 20%, compared with 53% for MLFQ and 62% for RR with a 5 ms quantum.</p>
 
 <h3>2.4 Prediction accuracy</h3>
-<p>The learned model has a lower prediction error than exponential averaging on all six workloads, with reductions between 12% and 22% (Fig. 3). The improvement is largest on I/O-bound processes, where exponential averaging reacts too much to individual random bursts, while the model learns to predict close to the typical burst length.</p>
+<p>The learned model, a gradient boosting regressor [3] built with scikit-learn [4], has a lower prediction error than exponential averaging on all six workloads, with reductions between 12% and 22% (Fig. 3). The improvement is largest on I/O-bound processes, where exponential averaging reacts too much to individual random bursts, while the model learns to predict close to the typical burst length.</p>
 <figure class="mid">
 <img src="../../../figures/fig8_prediction_error.png" alt="Prediction error">
 <figcaption>Fig. 3. Reduction in prediction error (MAE) of the learned model compared with exponential averaging</figcaption>
 </figure>
 
 <h3>2.5 Adaptation of the time quantum</h3>
-<p>To check that the quantum really follows the workload, the scheduler was run on a workload whose mix changes every 30 seconds (Fig. 4). The quantum stays around 6 ms while interactive processes arrive, rises to the 100 ms limit for CPU-bound processes, and drops to about 3.5 ms for I/O-bound processes. This is close to the theoretical 80th percentile of their bursts (3.2 ms). No single fixed quantum suits all three phases.</p>
+<p>To check that the quantum really follows the workload, the scheduler was run on a workload whose mix changes every 30 seconds (Fig. 4). The quantum stays around 6 ms while interactive processes arrive, climbs towards the 100 ms upper limit for CPU-bound processes (peaking at about 97 ms), and drops to about 3.4 ms for I/O-bound processes. This is close to the theoretical 80th percentile of their bursts (3.2 ms). No single fixed quantum suits all three phases.</p>
 <figure class="mid">
 <img src="../../../figures/fig4_quantum_over_time.png" alt="Quantum over time">
 <figcaption>Fig. 4. Time quantum of the proposed scheduler on a changing workload (dotted lines: fixed Round Robin quanta)</figcaption>
@@ -108,25 +108,40 @@
 </table>
 <p>Removing ageing lowers the average on W4 a little, but the worst case rises by 26% on W4 and doubles on W5, so ageing is what keeps long processes from starving. The adaptive quantum matters most when bursts are long: fixing it at 10 ms on W5 raises the average by 11% and the worst case by 52%. Using the better prediction alone (plain SJF with the learned model) improves on SJF-EMA by only 5% on W4. So most of the gain comes from using the prediction in both places together. Class modulation and online refit change the average by less than 3%; the latter is expected since training and test workloads come from the same generator.</p>
 
-<h3>2.7 Expected outcomes and verdicts</h3>
-<p>At the start of the project, seven expected outcomes were written down before any experiment was run. Table 3 lists them with what the experiments actually showed.</p>
-<p class="tcaption">Table 3. Expected outcomes stated at the start of the project, and what was observed</p>
+<h3>2.7 Other metrics</h3>
+<p>Table 3 gives selected additional metrics for representative schedulers on W4. CPU utilisation and throughput are practically the same for every scheduler, which is expected: the CPU never idles while work is waiting, and every scheduler eventually completes the same 200 processes. The proposed scheduler has a lower 95th-percentile wait and fewer starved processes than SJF-EMA, but Round Robin and MLFQ are lower on both. Its Jain fairness index is slightly lower than SJF-EMA's (0.816 against 0.829), and the same holds on every other workload except W3. So the shorter worst case does not translate into a more even spread of progress across processes.</p>
+<p class="tcaption">Table 3. Other metrics on W4 (mean of 10 seeds)</p>
+<table style="font-size:10pt">
+  <tr><th>Scheduler</th><th class="n">95th pct wait (ms)</th><th class="n">CPU util.</th><th class="n">Throughput (/s)</th><th class="n">Jain fairness</th><th class="n">Starved / run</th><th class="n">MAE (ms)</th><th class="n">RMSE (ms)</th></tr>
+  <tr><td style="white-space:nowrap">FCFS</td><td class="n">12,895</td><td class="n">0.809</td><td class="n">2.17</td><td class="n">0.732</td><td class="n">17.7</td><td class="n">&ndash;</td><td class="n">&ndash;</td></tr>
+  <tr><td style="white-space:nowrap">SJF-EMA</td><td class="n">10,314</td><td class="n">0.813</td><td class="n">2.18</td><td class="n">0.829</td><td class="n">9.1</td><td class="n">10.62</td><td class="n">29.71</td></tr>
+  <tr><td style="white-space:nowrap">SRTF-EMA</td><td class="n">11,683</td><td class="n">0.819</td><td class="n">2.20</td><td class="n">0.842</td><td class="n">10.2</td><td class="n">10.62</td><td class="n">29.71</td></tr>
+  <tr><td style="white-space:nowrap">RR-5</td><td class="n">8,361</td><td class="n">0.817</td><td class="n">2.19</td><td class="n">0.782</td><td class="n">3.4</td><td class="n">&ndash;</td><td class="n">&ndash;</td></tr>
+  <tr><td style="white-space:nowrap">MLFQ</td><td class="n">8,565</td><td class="n">0.818</td><td class="n">2.20</td><td class="n">0.796</td><td class="n">3.9</td><td class="n">&ndash;</td><td class="n">&ndash;</td></tr>
+  <tr><td style="white-space:nowrap">Oracle</td><td class="n">7,515</td><td class="n">0.819</td><td class="n">2.20</td><td class="n">0.869</td><td class="n">5.8</td><td class="n">&ndash;</td><td class="n">&ndash;</td></tr>
+  <tr><td style="white-space:nowrap"><b>Adaptive-ML</b></td><td class="n"><b>9,407</b></td><td class="n"><b>0.818</b></td><td class="n"><b>2.20</b></td><td class="n"><b>0.816</b></td><td class="n"><b>6.7</b></td><td class="n"><b>9.11</b></td><td class="n"><b>26.97</b></td></tr>
+</table>
+<p>One prediction with the learned model took 0.50 ms in the isolated benchmark of the training script. Inside the full experiment, where nine simulations ran in parallel on the same laptop, the measured average was about 1.2 ms per prediction on W4, against about 1 &micro;s for exponential averaging.</p>
+
+<h3>2.8 Expected outcomes and verdicts</h3>
+<p>The seven hypotheses H1&ndash;H7 were stated in Review 1, before any experiment was run. Table 4 lists them with what the experiments showed. By the falsification rule fixed in Review 1 (mean paired improvement over SJF-EMA larger than one standard deviation across the ten seeds), the main hypothesis holds on W4 (674 ms against 117 ms) but not on W5 (106 ms against 615 ms).</p>
+<p class="tcaption">Table 4. Hypotheses stated in Review 1, and what was observed</p>
 <table class="long">
-  <tr><th style="width:5%">#</th><th style="width:48%">Expected outcome</th><th>Observed</th></tr>
-  <tr><td>H1</td><td>Lower average wait than SJF-EMA on W4, W5 and W6</td><td>Partly: clearly on W4; W5 and W6 within the noise</td></tr>
-  <tr><td>H2</td><td>Far fewer context switches than small-quantum RR without slow response</td><td>Supported</td></tr>
-  <tr><td>H3</td><td>Lower worst-case wait than SJF-EMA and SRTF-EMA</td><td>Partly: on 5 of 6 workloads (not W2)</td></tr>
+  <tr><th style="width:5%">#</th><th style="width:48%">Hypothesis</th><th>Observed</th></tr>
+  <tr><td>H1</td><td>Lower average wait than SJF-EMA on W4, W5 and W6, largest on W5</td><td>Partly: clearly on W4 (&minus;27%); W5 (&minus;2%) and W6 (+3%) within the noise</td></tr>
+  <tr><td>H2</td><td>Far fewer context switches than small-quantum RR, with response time closer to small-quantum than to large-quantum RR</td><td>Supported: on W4, 5,933 switches against 15,328 (RR-5); response 15.4 ms against 11.4 (RR-2) and 69.3 (RR-20)</td></tr>
+  <tr><td>H3</td><td>Lower worst-case wait than SJF and SRTF, because of ageing</td><td>Partly: on 5 of 6 workloads (not W2)</td></tr>
   <tr><td>H4</td><td>About the same as SJF-EMA on the uniform workloads W1 and W2</td><td>Partly: W1 yes (&minus;2%), W2 no (+14%)</td></tr>
-  <tr><td>H5</td><td>Never better than the oracle</td><td>Supported (0 of 60 instances)</td></tr>
-  <tr><td>H6</td><td>Learned model more accurate than exponential averaging</td><td>Supported on all six workloads</td></tr>
-  <tr><td>H7</td><td>Removing ageing lowers the average but raises the worst case</td><td>Partly: W4 yes; on W5 only the worst case changes</td></tr>
+  <tr><td>H5</td><td>Does not beat the oracle on average wait</td><td>Supported (0 of 60 instances)</td></tr>
+  <tr><td>H6</td><td>Lower prediction MAE than exponential averaging on W5, roughly comparable on W1</td><td>Supported on W5 (27.1 against 31.8 ms); on W1 the model was 12% better rather than comparable</td></tr>
+  <tr><td>H7</td><td>Removing ageing slightly lowers the average but raises the worst case and starvation</td><td>Partly: W4 yes; on W5 the average does not drop, but the worst case doubles and starved processes rise from 0.2 to 8.0</td></tr>
 </table>
 
 <h2>3. Comparison with Existing Systems</h2>
 
 <h3>3.1 Against the classical algorithms</h3>
-<p>Table 4 compares the proposed scheduler with each existing algorithm on the mixed workload W4.</p>
-<p class="tcaption">Table 4. Comparison on the mixed workload W4 (mean of 10 seeds)</p>
+<p>Table 5 compares the proposed scheduler with each existing algorithm on the mixed workload W4.</p>
+<p class="tcaption">Table 5. Comparison on the mixed workload W4 (mean of 10 seeds)</p>
 <table>
   <tr><th>Scheduler</th><th class="n">Avg wait (ms)</th><th class="n">Worst wait (ms)</th><th class="n">Response (ms)</th><th class="n">Switches</th><th class="n">Proposed avg wait vs this</th></tr>
   <tr><td>FCFS</td><td class="n">4,003</td><td class="n">19,407</td><td class="n">240</td><td class="n">3,962</td><td class="n">&minus;55.4%</td></tr>
@@ -139,16 +154,16 @@
   <tr><td>MLFQ</td><td class="n">1,878</td><td class="n">15,016</td><td class="n">2.8</td><td class="n">11,888</td><td class="n">&minus;4.9%</td></tr>
   <tr><td><b>Adaptive-ML (proposed)</b></td><td class="n"><b>1,786</b></td><td class="n"><b>18,388</b></td><td class="n"><b>15.4</b></td><td class="n"><b>5,933</b></td><td class="n">&ndash;</td></tr>
 </table>
-<p>The proposed scheduler has a lower average waiting time than every classical algorithm except SRTF-EMA, which is 3% better on average. SRTF-EMA, however, has a 35% higher worst-case wait and 16% more context switches, because it preempts the running process on every arrival. MLFQ comes close on average waiting time and responds faster, since new processes always start in its top queue, but it needs twice as many context switches. Round Robin with 5 to 20 ms quanta keeps a lower worst case, as expected from its strict rotation, but the proposed scheduler has an 18% to 31% lower average waiting time than these.</p>
-<p>The same comparison on the phase-changing workload W5 is shown in Fig. 5 for one seed. Here plain FCFS has the lowest average waiting time of all, even lower than the oracle. With processes that have many bursts, always running the shortest burst first (as SJF, SRTF and the oracle do) repeatedly delays processes in their long phase, and this dominates the average. It also shows that the oracle is a strong reference for burst ordering, but not an absolute lower bound when processes have many bursts.</p>
+<p>The proposed scheduler has a lower average waiting time than every classical algorithm except SRTF-EMA, which is 3% better on average. SRTF-EMA, however, has a 35% higher worst-case wait and 16% more context switches, because it preempts the running process whenever a newly ready process has a shorter predicted remaining time, and it has no ageing. MLFQ comes close on average waiting time and responds faster, since new processes always start in its top queue, but it needs twice as many context switches. Round Robin with 5 to 20 ms quanta keeps a lower worst case, as expected from its strict rotation, but the proposed scheduler has an 18% to 31% lower average waiting time than these.</p>
+<p>The same comparison on the phase-changing workload W5 is shown in Fig. 5 for one seed. Here plain FCFS has the lowest average waiting time of all, even lower than the oracle, and the same is true of the ten-seed averages (4,330 ms against 4,617 ms). With processes that have many bursts, always running the shortest burst first (as SJF, SRTF and the oracle do) repeatedly delays processes in their long phase, and this dominates the average. It also shows that the oracle is a strong reference for burst ordering, but not an absolute lower bound when processes have many bursts.</p>
 <figure>
 <img src="../../terminal/08_demo_w5.png" alt="Comparison on W5">
 <figcaption>Fig. 5. All eleven schedulers on the phase-changing workload W5 (one seed)</figcaption>
 </figure>
 
 <h3>3.2 Against approaches from the literature</h3>
-<p>Table 5 compares the proposed scheduler with the related approaches studied in Review 1.</p>
-<p class="tcaption">Table 5. Comparison with related approaches</p>
+<p>Table 6 compares the proposed scheduler with the related approaches studied in Review 1.</p>
+<p class="tcaption">Table 6. Comparison with related approaches</p>
 <table class="long">
   <tr><th style="width:25%">Approach</th><th style="width:20%">Burst lengths needed in advance</th><th style="width:20%">Burst prediction</th><th style="width:15%">Time quantum</th><th>Main limitation</th></tr>
   <tr><td>Round Robin [1]</td><td>No</td><td>None</td><td>Fixed</td><td>Quantum chosen by hand</td></tr>
@@ -157,15 +172,15 @@
   <tr><td>SARR, median quantum [7]</td><td>Yes</td><td>None</td><td>Median of bursts</td><td>Assumes known burst times</td></tr>
   <tr><td>Mean-average quantum [8]</td><td>Yes</td><td>None</td><td>Mean of bursts</td><td>Assumes known burst times</td></tr>
   <tr><td>PBDRR [9]</td><td>Yes</td><td>None</td><td>Per process</td><td>Assumes known burst times</td></tr>
-  <tr><td>ML time slices in Linux [11]</td><td>No</td><td>C4.5 per known program</td><td>Per program</td><td>Needs known programs; small gains</td></tr>
-  <tr><td>Fuzzy burst prediction [12]</td><td>No</td><td>Fuzzy inference</td><td>None</td><td>Prediction used for ordering only</td></tr>
+  <tr><td>ML time slices in Linux [10]</td><td>No</td><td>C4.5 per known program</td><td>Per program</td><td>Needs known programs; small gains</td></tr>
+  <tr><td>Fuzzy burst prediction [11]</td><td>No</td><td>Fuzzy inference</td><td>None</td><td>Prediction used for ordering only</td></tr>
   <tr><td><b>Proposed scheduler</b></td><td><b>No</b></td><td><b>Gradient boosting, 12 features</b></td><td><b>80th percentile of predictions, adjusted live</b></td><td><b>Simulation only; slower prediction than a kernel allows</b></td></tr>
 </table>
-<p>The main difference from the dynamic-quantum Round Robin variants [7]&ndash;[10], and from proportional-share methods such as lottery scheduling [19], is that the proposed scheduler never assumes that burst lengths are known; it predicts them from history and corrects the quantum using its own prediction errors. Compared with earlier prediction work [11], [12], the prediction is used both for ordering and for the quantum, and an ageing term protects long processes. Unlike whole-job run-time prediction [13], [14] and heavier learning methods for clusters [15], [16] or for modelling the Linux scheduler [18], the approach here is light and works on individual CPU bursts, which addresses the overhead concern raised in [17], though it is still more costly than the fair-share scheduler in Linux [20].</p>
+<p>The main difference from the dynamic Round Robin variants [7]&ndash;[9], [12] is that the proposed scheduler never assumes that burst lengths are known; it predicts them from history and corrects the quantum using its own prediction errors. Proportional-share methods such as lottery scheduling [13] aim at fairness rather than waiting time and do not use burst lengths at all. Compared with earlier prediction work [10], [11], the prediction is used both for ordering and for the quantum, and an ageing term protects long processes. Unlike whole-job run-time prediction [14], [15] and heavier learning methods for clusters [16], [17] or for modelling the Linux scheduler [18], the approach here is much lighter and works on individual CPU bursts, which addresses the overhead concern raised in [19], though it is still more costly than the fair-share scheduler in Linux [20].</p>
 
 <h2>4. Conclusion</h2>
 <p>This project set out to check whether predicting CPU bursts, and using the prediction both to order the ready queue and to size the time quantum, makes a measurable difference compared with the classical algorithms. The answer depends on the workload. On the mixed workload, where short interactive bursts compete with long CPU-bound ones, the proposed scheduler reduced the average waiting time by 27% compared with SJF using exponential averaging. It was better on every seed, closed more than half the gap to the oracle, cut the worst-case wait by 23%, and needed 61% fewer context switches than Round Robin with a 5 ms quantum. The ageing term roughly halved the worst-case waiting time on CPU-bound and phase-changing workloads, and the learned predictor was 12&ndash;22% more accurate than exponential averaging everywhere.</p>
-<p>It did not help on every workload. When all processes have short random bursts (I/O-bound and interactive workloads), there is nothing to predict beyond the average, and preempting at a small quantum only adds switches, so the scheduler was 5&ndash;14% worse than SJF there. Under heavy overload, the ageing term pushes the order towards FCFS. We also found that better prediction accuracy by itself brings only a small gain; most of the benefit comes from how the prediction is used. Overall, the results support the main idea of applying the textbook quantum rule automatically from live predictions, while showing where its limits are.</p>
+<p>It did not help on every workload. When all processes have short random bursts (I/O-bound and interactive workloads), there is nothing to predict beyond the average, and preempting at a small quantum only adds switches, so the scheduler was 5&ndash;14% worse than SJF there. Under heavy overload, the ageing term pushes the order towards FCFS. We also found that better prediction accuracy by itself brings only a small gain; most of the benefit comes from how the prediction is used. And although the worst case improved, Jain's fairness index was slightly lower than SJF-EMA's on five of the six workloads. Overall, the results support the main idea of applying the textbook quantum rule automatically from live predictions, while showing where its limits are.</p>
 
 <h2>5. Future Work</h2>
 <ul>
@@ -187,16 +202,16 @@
 <p>[7] R. J. Matarneh, &ldquo;Self-adjustment time quantum in round robin algorithm depending on burst time of the now running processes,&rdquo; <i>American Journal of Applied Sciences</i>, vol. 6, no. 10, pp. 1831&ndash;1837, 2009.</p>
 <p>[8] A. Noon, A. Kalakech, and S. Kadry, &ldquo;A new round robin based scheduling algorithm for operating systems: Dynamic quantum using the mean average,&rdquo; <i>International Journal of Computer Science Issues</i>, vol. 8, no. 3, pp. 224&ndash;229, 2011.</p>
 <p>[9] R. Mohanty, H. S. Behera, K. Patwari, M. Dash, and M. L. Prasanna, &ldquo;Priority based dynamic round robin (PBDRR) algorithm with intelligent time slice for soft real time systems,&rdquo; <i>International Journal of Advanced Computer Science and Applications</i>, vol. 2, no. 2, pp. 46&ndash;50, 2011.</p>
-<p>[10] T. Helmy and A. Dekdouk, &ldquo;Burst round robin as a proportional-share scheduling algorithm,&rdquo; in <i>Proc. IEEE GCC Conference</i>, 2007.</p>
-<p>[11] A. Negi and P. K. Kumar, &ldquo;Applying machine learning techniques to improve Linux process scheduling,&rdquo; in <i>Proc. IEEE Region 10 Conference (TENCON)</i>, 2005, pp. 1&ndash;6.</p>
-<p>[12] A. Pourali and A. M. Rahmani, &ldquo;A fuzzy-based scheduling algorithm for prediction of next CPU-burst time to implement shortest process next,&rdquo; in <i>Proc. IACSIT Spring Conference (IACSIT-SC)</i>, 2009, pp. 217&ndash;220.</p>
-<p>[13] W. Smith, I. Foster, and V. Taylor, &ldquo;Predicting application run times using historical information,&rdquo; in <i>Job Scheduling Strategies for Parallel Processing</i>, LNCS vol. 1459. Springer, 1998, pp. 122&ndash;142.</p>
-<p>[14] D. Tsafrir, Y. Etsion, and D. G. Feitelson, &ldquo;Backfilling using system-generated predictions rather than user runtime estimates,&rdquo; <i>IEEE Transactions on Parallel and Distributed Systems</i>, vol. 18, no. 6, pp. 789&ndash;803, 2007.</p>
-<p>[15] H. Mao, M. Alizadeh, I. Menache, and S. Kandula, &ldquo;Resource management with deep reinforcement learning,&rdquo; in <i>Proc. 15th ACM Workshop on Hot Topics in Networks (HotNets)</i>, 2016, pp. 50&ndash;56.</p>
-<p>[16] H. Mao, M. Schwarzkopf, S. B. Venkatakrishnan, Z. Meng, and M. Alizadeh, &ldquo;Learning scheduling algorithms for data processing clusters,&rdquo; in <i>Proc. ACM SIGCOMM</i>, 2019, pp. 270&ndash;288.</p>
-<p>[17] Y. Zhang, X. Zhao, Z. Li, G. Cheng, J. Yin, L. Zhang, and Z. Chen, &ldquo;Integrating artificial intelligence into operating systems: A survey on techniques, applications, and future directions,&rdquo; arXiv:2407.14567, 2024.</p>
+<p>[10] A. Negi and P. K. Kumar, &ldquo;Applying machine learning techniques to improve Linux process scheduling,&rdquo; in <i>Proc. IEEE Region 10 Conference (TENCON)</i>, 2005, pp. 1&ndash;6.</p>
+<p>[11] A. Pourali and A. M. Rahmani, &ldquo;A fuzzy-based scheduling algorithm for prediction of next CPU-burst time to implement shortest process next,&rdquo; in <i>Proc. IACSIT Spring Conference (IACSIT-SC)</i>, 2009, pp. 217&ndash;220.</p>
+<p>[12] T. Helmy and A. Dekdouk, &ldquo;Burst round robin as a proportional-share scheduling algorithm,&rdquo; in <i>Proc. IEEE GCC Conference</i>, 2007.</p>
+<p>[13] C. A. Waldspurger and W. E. Weihl, &ldquo;Lottery scheduling: Flexible proportional-share resource management,&rdquo; in <i>Proc. 1st USENIX Symp. Operating Systems Design and Implementation (OSDI)</i>, 1994, pp. 1&ndash;11.</p>
+<p>[14] W. Smith, I. Foster, and V. Taylor, &ldquo;Predicting application run times using historical information,&rdquo; in <i>Job Scheduling Strategies for Parallel Processing</i>, LNCS vol. 1459. Springer, 1998, pp. 122&ndash;142.</p>
+<p>[15] D. Tsafrir, Y. Etsion, and D. G. Feitelson, &ldquo;Backfilling using system-generated predictions rather than user runtime estimates,&rdquo; <i>IEEE Transactions on Parallel and Distributed Systems</i>, vol. 18, no. 6, pp. 789&ndash;803, 2007.</p>
+<p>[16] H. Mao, M. Alizadeh, I. Menache, and S. Kandula, &ldquo;Resource management with deep reinforcement learning,&rdquo; in <i>Proc. 15th ACM Workshop on Hot Topics in Networks (HotNets)</i>, 2016, pp. 50&ndash;56.</p>
+<p>[17] H. Mao, M. Schwarzkopf, S. B. Venkatakrishnan, Z. Meng, and M. Alizadeh, &ldquo;Learning scheduling algorithms for data processing clusters,&rdquo; in <i>Proc. ACM SIGCOMM</i>, 2019, pp. 270&ndash;288.</p>
 <p>[18] S. Y. Kahu, &ldquo;KernelOracle: Predicting the Linux scheduler's next move with deep learning,&rdquo; arXiv:2505.15213, 2025.</p>
-<p>[19] C. A. Waldspurger and W. E. Weihl, &ldquo;Lottery scheduling: Flexible proportional-share resource management,&rdquo; in <i>Proc. 1st USENIX Symp. Operating Systems Design and Implementation (OSDI)</i>, 1994, pp. 1&ndash;11.</p>
+<p>[19] Y. Zhang, X. Zhao, Z. Li, G. Cheng, J. Yin, L. Zhang, and Z. Chen, &ldquo;Integrating artificial intelligence into operating systems: A survey on techniques, applications, and future directions,&rdquo; arXiv:2407.14567, 2024.</p>
 <p>[20] Linux Kernel Documentation, &ldquo;CFS Scheduler.&rdquo; [Online]. Available: https://docs.kernel.org/scheduler/sched-design-CFS.html</p>
 <p>[21] R. Cox, M. F. Kaashoek, and R. Morris, <i>xv6: A Simple, Unix-like Teaching Operating System</i>. MIT, 2020.</p>
 </div>

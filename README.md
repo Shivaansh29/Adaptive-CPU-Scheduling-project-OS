@@ -1,6 +1,7 @@
 # Adaptive CPU Scheduling Using Predicted Burst Lengths
 
-Operating Systems project · B.Tech CSE, Third Year
+Operating System (BCSE303P) course project · Slot L15+L16 · Faculty: Dr. Anisha M. Lal
+Vellore Institute of Technology · B.Tech CSE, Third Year
 
 Shivaansh Aggarwal (24BCE0883) · Devansh Sharma (24BCE0717)
 
@@ -67,8 +68,6 @@ Then run these in order (the times are for a 10-core laptop):
 | `docs/guide/transcript.pdf` | 5-minute speaking script for the Review 3 slides (key points in bold) |
 | `docs/terminal/*.png` | Real Terminal screenshots of the project running and of the key code |
 
-Older material from earlier reviews is also in `docs/` (`project_review.pdf`, `ieee_paper.pdf`).
-
 **Rebuilding them** (all built from HTML sources with Google Chrome):
 
 ```bash
@@ -79,14 +78,11 @@ sh docs/guide/build.sh        # guide.pdf and transcript.pdf from docs/guide/src
 The slide deck is built by `docs/reviews/src/review3_ppt.js` with Node and `pptxgenjs`
 (`NODE_PATH=<folder containing pptxgenjs>/node_modules node docs/reviews/src/review3_ppt.js`).
 
----|---|
-| `docs/project_review.pdf` | 3-page project review |
-| `docs/ieee_paper.pdf` | final paper in IEEE conference format (5 pages) |
-| `docs/screenshots/*.png` | real program output rendered as terminal screenshots |
-| Slide deck | 6 slides with speaker notes (link shared separately; download it as PowerPoint or PDF from its page) |
-
-To regenerate them after changing the code: `python make_screenshots.py` (screenshots) and
-`sh docs/build_pdfs.sh` (PDFs, built from `docs/src/*.html` with Google Chrome).
+**Older material** from before the final reviews is kept in `docs/`: `project_review.pdf`,
+`ieee_paper.pdf` and `docs/screenshots/`. Those screenshots are terminal-style images
+drawn by `make_screenshots.py` from real program output; the genuine Terminal captures
+used in the reviews are in `docs/terminal/`. The older PDFs are rebuilt with
+`sh docs/build_pdfs.sh` from `docs/src/`.
 
 ---
 
@@ -110,11 +106,12 @@ ai_cpu_scheduler/
 ├── run_experiments.py      runs the experiment matrix in parallel, writes results/*.csv
 ├── analyse.py              tables, hypothesis verdicts, figures
 ├── demo.py                 live terminal demo
-├── make_screenshots.py     renders real program output as PNG screenshots
+├── make_screenshots.py     draws program output as terminal-style images (docs/screenshots/)
 ├── docs/
 │   ├── reviews/            Review 1, 2, 3 PDFs, Review 3 slides, and their sources
 │   ├── guide/              project guide and presentation transcript
-│   └── terminal/           real Terminal screenshots
+│   ├── terminal/           real Terminal screenshots used in the reviews
+│   ├── src/, screenshots/  sources and images of the older review PDF and IEEE paper
 ├── models/                 trained models (created by train_models.py)
 ├── results/                raw CSVs, REPORT.md, model_report.json
 └── figures/                PNG figures for the report and slides
@@ -165,7 +162,8 @@ I/O-bound or interactive.
 
 **Feedback loop.** When a burst finishes, its real length is compared with the
 prediction (error logged) and stored as a training example. Every 2,000 new
-examples the model is refit on the offline data plus this buffer.
+examples the model is refit on a 10,000-row sample of the offline data plus the
+last 4,000 live examples.
 
 ### The adaptive scheduler (`adaptive.py`, `quantum.py`)
 
@@ -250,17 +248,17 @@ results are deterministic, so re-running gives exactly these numbers.
 | Average wait | −1.9% | +13.8% | +5.3% | **−27.4%** | −1.7% | +2.6% |
 | Worst-case wait | **−56%** | +0.5% | **−27%** | **−23%** | **−53%** | −2% |
 
-### Hypotheses (stated before any experiment, in Review 1)
+### Hypotheses (stated before any experiment, in Review 1, section 4)
 
 | # | Hypothesis | Verdict |
 |---|---|---|
-| H1 | Lower average wait than SJF-EMA on W4, W5, W6 | **Partly**: clearly on W4. W5 and W6 are within the noise. |
-| H2 | Far fewer switches than small-quantum RR, response time not collapsing | **Supported** |
+| H1 | Lower average wait than SJF-EMA on W4, W5, W6, largest on W5 | **Partly**: clearly on W4. W5 and W6 are within the noise. |
+| H2 | Far fewer switches than small-quantum RR, response time closer to small-quantum than large-quantum RR | **Supported** |
 | H3 | Lower worst-case wait than SJF-EMA and SRTF-EMA | **Partly**: on 5 of 6 workloads (not W2) |
 | H4 | About equal to SJF-EMA on W1 and W2 | **Partly**: W1 yes (−1.9%), W2 no (+13.8%) |
 | H5 | Never beats the oracle | **Supported** (0 of 60 instances) |
-| H6 | Learned model more accurate than exponential averaging | **Supported** on all 6 workloads (12-22% lower error) |
-| H7 | Removing ageing lowers the average but raises worst-case wait | **Partly**: W4 yes. On W5 the average does not drop, but the worst case doubles. |
+| H6 | Lower prediction error than exponential averaging on W5, roughly comparable on W1 | **Supported** on W5; on W1 the model was 12% better rather than comparable |
+| H7 | Removing ageing slightly lowers the average but raises worst-case wait and starvation | **Partly**: W4 yes. On W5 the average does not drop, but the worst case doubles. |
 
 ### What the results mean
 
@@ -274,7 +272,7 @@ results are deterministic, so re-running gives exactly these numbers.
    quantum grows to about 95 ms. Fixing it at 10 ms instead costs 11% on
    average wait, 52% on worst-case wait, and doubles the switches. The
    quantum also visibly follows the workload (Fig. 4): about 6 ms for
-   interactive processes, 100 ms for CPU-bound, 3.5 ms for I/O-bound.
+   interactive processes, close to the 100 ms cap for CPU-bound, 3.4 ms for I/O-bound.
 4. **Better prediction alone helps only a little.** The learned model is
    12-22% more accurate everywhere. But ML-predicted SJF on its own
    ("Prediction only" in the ablation) is only 5% better than SJF-EMA on W4,
@@ -291,7 +289,10 @@ results are deterministic, so re-running gives exactly these numbers.
 7. **The oracle is not a hard floor when processes have many bursts.** On W5,
    plain FCFS beats it. Always running the shortest burst first starves some
    processes for over a minute, which dominates the average.
-8. **Online refit made no measurable difference.** That is expected: the model
+8. **Fairness did not improve.** Jain's fairness index (on each process's
+   progress rate) was slightly lower than SJF-EMA's on five of six workloads,
+   for example 0.816 against 0.829 on W4, even though the worst case improved.
+9. **Online refit made no measurable difference.** That is expected: the model
    was trained on the same kind of workload it was tested on.
 
 | Figure | Shows |
@@ -344,8 +345,8 @@ results are deterministic, so re-running gives exactly these numbers.
   tested on (different seeds and processes). Real programs would be messier.
 - The online refit cannot show a benefit here, because there is no
   distribution shift between training and testing.
-- Prediction latency (about 0.5 ms in Python) is far above what a kernel could
-  afford. A real implementation would need a much smaller model, such as a
+- Prediction latency (0.5 ms in the isolated benchmark, about 1.2 ms measured
+  inside the parallel experiment) is far above what a kernel could afford. A real implementation would need a much smaller model, such as a
   shallow tree or a lookup table.
 
 ## Running the tests

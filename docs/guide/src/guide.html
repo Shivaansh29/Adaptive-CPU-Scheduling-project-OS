@@ -214,7 +214,7 @@
 <p><b>Class modulation.</b> The classifier labels the processes seen in the epoch; the percentile becomes 80 + 10 &times; (fraction CPU-bound &minus; fraction interactive), limited to 50&ndash;95. Interactive mixes get a smaller quantum (faster response), CPU-bound mixes a larger one (fewer switches).</p>
 <figure class="mid">
 <img src="../../../figures/fig4_quantum_over_time.png" alt="Quantum over time">
-<figcaption>Fig. 11. The quantum on a workload that changes from interactive (about 6 ms) to CPU-bound (100 ms) to I/O-bound (about 3.5 ms)</figcaption>
+<figcaption>Fig. 11. The quantum on a workload that changes from interactive (about 6 ms) to CPU-bound (close to the 100 ms cap) to I/O-bound (about 3.5 ms)</figcaption>
 </figure>
 
 <h2>8. Experiments and evaluation pipeline</h2>
@@ -304,7 +304,7 @@ pip install -r requirements.txt</pre>
 <p class="q">What if the prediction is wrong?</p>
 <p>A wrong prediction only affects ordering and quantum; the process still runs. Ageing guarantees a long-waiting process eventually goes first, and the quantum uses observed error ratios, so it adjusts for systematic errors.</p>
 <p class="q">Why not just use SRTF?</p>
-<p>SRTF-EMA is 3% better on average on W4 but has a 35% higher worst-case wait and more switches, because it preempts on every arrival and has no ageing.</p>
+<p>SRTF-EMA is 3% better on average on W4 but has a 35% higher worst-case wait and more switches, because it preempts whenever a newly ready process has a shorter predicted remaining time, and it has no ageing.</p>
 <p class="q">How did you avoid tuning to the test data?</p>
 <p>The model was trained on seeds 1000&ndash;1004, &beta; was tuned on seeds 100&ndash;102, and the evaluation used seeds 0&ndash;9. All the other parameters came from the original plan.</p>
 <p class="q">Why does it lose on I/O-bound workloads?</p>

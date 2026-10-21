@@ -218,7 +218,7 @@ pres.addSection({ title: "Performance evaluation" });
   const s = pres.addSlide({ masterName: "CONTENT", sectionTitle: "Performance evaluation" });
   s.addText("Why it works: adaptive quantum and ageing", { placeholder: "title", bold: true, align: "left" });
   s.addImage({ path: IMG("figures/fig4_quantum_over_time.png"), x: 0.5, y: 1.1, w: 5.1, h: 2.61, objectName: "Quantum over time chart" });
-  caption(s, "The quantum follows the workload: about 6 ms (interactive), 100 ms (CPU-bound), 3.5 ms (I/O-bound)", 0.5, 3.78, 5.1);
+  caption(s, "The quantum follows the workload: about 6 ms (interactive), close to 100 ms (CPU-bound), 3.5 ms (I/O-bound)", 0.5, 3.78, 5.1);
   text(s, "Ablation on W5 (ms, mean of 10 seeds)", { x: 5.9, y: 1.05, w: 3.6, h: 0.3, bold: true, fontSize: 13, color: C.text2 });
   const head = ["Variant", "Avg", "Worst"].map((t) => ({ text: t, options: { bold: true, color: C.background1, fill: { color: C.text2 }, fontSize: 11 } }));
   const rows = [["Full scheduler", "6,163", "25,831"], ["No ageing", "6,196", "53,915"], ["Fixed 10 ms quantum", "6,864", "39,254"], ["Prediction only", "6,325", "53,593"]]
@@ -229,7 +229,7 @@ pres.addSection({ title: "Performance evaluation" });
   card(s, 5.9, 3.2, 3.6, 1.75, "Ablation takeaways");
   s.addText(bullets(["Without ageing the worst case doubles", "A fixed quantum costs 11% average, 52% worst", "Better prediction alone gains only 5% on W4: the gain comes from using it twice"], 12),
     { x: 6.05, y: 3.3, w: 3.35, h: 1.6, isTextBox: true, margin: 0, valign: "top" });
-  s.addNotes("Devansh: The quantum follows the workload, about 6 ms for interactive, 100 ms for CPU-bound and 3.5 ms for I/O-bound. Switching parts off shows that ageing controls the worst case, the adaptive quantum matters for long bursts, and prediction alone gives only 5%. The benefit comes from using the prediction twice.");
+  s.addNotes("Devansh: The quantum follows the workload, about 6 ms for interactive, close to 100 ms for CPU-bound and 3.5 ms for I/O-bound. Switching parts off shows that ageing controls the worst case, the adaptive quantum matters for long bursts, and prediction alone gives only 5%. The benefit comes from using the prediction twice.");
 }
 
 pres.addSection({ title: "Comparison and conclusion" });

@@ -67,7 +67,11 @@ class SJF(PredictivePolicy):
 
 
 class SRTF(PredictivePolicy):
-    """Shortest-Remaining-Time-First using predicted bursts. Preempts on arrival."""
+    """Shortest-Remaining-Time-First using predicted bursts.
+
+    Preempts the running process when a newly ready process has a shorter
+    predicted remaining time.
+    """
     preemptive = True
 
     def __init__(self, predictor):

@@ -31,7 +31,7 @@
 
 <h2>Abstract</h2>
 <p>The CPU scheduler decides which ready process gets the processor next and for how long it may keep it. The algorithms covered in the course, First-Come-First-Served (FCFS), Shortest-Job-First (SJF) and Round Robin (RR), are all static: each is configured once and then applied the same way no matter how the workload behaves. SJF gives the lowest average waiting time but needs the length of the next CPU burst, which is not known at the time of the decision. Operating systems therefore estimate it with exponential averaging, an estimate that lags badly whenever a process changes its behaviour. Round Robin, on the other hand, uses a time quantum that is chosen by hand and never revisited.</p>
-<p>This project builds a CPU scheduler that predicts the next CPU burst of every process using a small machine learning model trained on the process's own history, and then uses that prediction in two places: to decide which process runs next, with an ageing term so that long processes do not starve, and to resize the time quantum continuously while the system runs. The scheduler is implemented in Python inside a discrete-event simulator and compared against FCFS, SJF, SRTF, Round Robin with several quanta, a multilevel feedback queue, and an oracle that knows every burst in advance. This document covers the background, the literature that was studied, and the gaps in existing work that the project sets out to address.</p>
+<p>This project builds a CPU scheduler that predicts the next CPU burst of every process using a small machine learning model trained on the process's own history, and then uses that prediction in two places: to decide which process runs next, with an ageing term so that long processes do not starve, and to resize the time quantum continuously while the system runs. The scheduler is implemented in Python inside a discrete-event simulator and compared against FCFS, SJF, SRTF, Round Robin with several quanta, a multilevel feedback queue, and an oracle that knows every burst in advance. This document covers the background, the literature that was studied, the gaps in existing work that the project sets out to address, and the hypotheses that the evaluation will test.</p>
 
 <h2>1. Introduction</h2>
 
@@ -113,12 +113,25 @@
 
 <h3>3.1 How this project addresses the gaps</h3>
 <ul>
-  <li>The next CPU burst of each process is <b>predicted</b> from data the system already has (past bursts, I/O waits, variability), using a small gradient-boosting model, instead of being assumed known.</li>
+  <li>The next CPU burst of each process is <b>predicted</b> from data the system already has (past bursts, I/O waits, variability), using a small gradient-boosting model [15], instead of being assumed known.</li>
   <li>The prediction is used <b>twice</b>: to order the ready queue and to recompute the time quantum from the 80% rule while the system runs.</li>
   <li>An <b>ageing term</b> is added to the ordering so that long processes cannot starve, and the worst-case waiting time is measured explicitly.</li>
   <li>Evaluation uses a <b>verified simulator</b> with I/O, context-switch cost, many processes, six workload types and ten random repetitions, with an <b>oracle</b> that knows all burst lengths as a reference point.</li>
 </ul>
 <p>The proposed methodology and architecture are described in Review 2, and the performance evaluation and comparison in Review 3.</p>
+
+<h2>4. Hypotheses</h2>
+<p>The expected outcomes below were written down before any code or experiment existed. They are directions, not results. In Review 3 each one will be marked as supported, partly supported or not supported. Here, &ldquo;heterogeneous&rdquo; workloads are the mixed, the phase-changing and the overloaded mixed workloads, and &ldquo;homogeneous&rdquo; ones are the all CPU-bound and all I/O-bound workloads.</p>
+<ul>
+  <li><b>H1.</b> The adaptive scheduler lowers the average waiting time compared with SJF using exponential averaging on heterogeneous workloads, with the largest margin on phase-changing processes.</li>
+  <li><b>H2.</b> The number of context switches falls substantially compared with small-quantum Round Robin, while the average response time stays closer to small-quantum Round Robin than to large-quantum Round Robin.</li>
+  <li><b>H3.</b> The worst-case waiting time is lower than with SJF and SRTF, because the ageing term bounds it.</li>
+  <li><b>H4.</b> On homogeneous workloads the scheduler performs about the same as SJF with exponential averaging, since there is little variation to adapt to.</li>
+  <li><b>H5.</b> The scheduler does not beat the oracle, which knows every true burst length, on average waiting time. This hypothesis compares Adaptive-ML with an SRTF reference that uses true burst lengths. The reference provides privileged burst information but is not guaranteed to minimize total waiting time across every multi-burst workload.</li>
+  <li><b>H6.</b> The learned model has a lower prediction error than exponential averaging on phase-changing processes, and a roughly comparable one on CPU-bound processes.</li>
+  <li><b>H7.</b> Switching off ageing lowers the average waiting time slightly, but increases the worst-case waiting time and the number of starved processes.</li>
+</ul>
+<p>The falsification rule was also fixed in advance: if, across ten random seeds on the mixed and phase-changing workloads, the mean waiting time is not lower than that of SJF with exponential averaging by more than one standard deviation, the main hypothesis is not supported for those workloads, and Review 3 will report that.</p>
 
 <h2>References</h2>
 <div class="refs">
@@ -136,6 +149,7 @@
 <p>[12] H. Mao, M. Alizadeh, I. Menache, and S. Kandula, &ldquo;Resource management with deep reinforcement learning,&rdquo; in <i>Proc. 15th ACM Workshop on Hot Topics in Networks (HotNets)</i>, 2016, pp. 50&ndash;56.</p>
 <p>[13] Y. Zhang, X. Zhao, Z. Li, G. Cheng, J. Yin, L. Zhang, and Z. Chen, &ldquo;Integrating artificial intelligence into operating systems: A survey on techniques, applications, and future directions,&rdquo; arXiv:2407.14567, 2024.</p>
 <p>[14] S. Y. Kahu, &ldquo;KernelOracle: Predicting the Linux scheduler's next move with deep learning,&rdquo; arXiv:2505.15213, 2025.</p>
+<p>[15] J. H. Friedman, &ldquo;Greedy function approximation: A gradient boosting machine,&rdquo; <i>Annals of Statistics</i>, vol. 29, no. 5, pp. 1189&ndash;1232, 2001.</p>
 </div>
 
 </body>
