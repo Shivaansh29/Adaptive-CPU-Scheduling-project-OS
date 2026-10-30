@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Review 3 - Adaptive CPU Scheduling Using Predicted Burst Lengths</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  figure.mid img { width: 66%; }
+  figure.wide img { width: 76%; }
+  figure.tune img { width: 62%; }
+  figure.small img { width: 50%; }
+  figure.term img { width: 68%; }
+  .refs p { font-size: 10pt; margin-bottom: 2pt; }
+  figure.pq img { width: 64%; }
+  table.w7 td:first-child { white-space: nowrap; }
+  table.t10 { font-size: 10pt; }
+  table.t10 td, table.t10 th { padding: 2pt 4pt; }
+  .box { border: 0.75pt solid #000; padding: 6pt 10pt; margin: 6pt 0 10pt; break-inside: avoid; }
+  .box p:last-child, .box ol:last-child { margin-bottom: 0; }
+</style>
+</head>
+<body>
+
+<div class="cover">
+  <img src="../assets/vit_logo.png" alt="Vellore Institute of Technology">
+  <div class="course">Operating System (BCSE303P)</div>
+  <div class="doc">Course Project &ndash; Review 3</div>
+  <div class="slot">L15+L16</div>
+  <div class="faculty">Faculty: Dr. Anisha M. Lal</div>
+  <div class="title">Adaptive CPU Scheduling Using Predicted Burst Lengths</div>
+  <div class="by">Submitted by</div>
+  <table class="team">
+    <tr><td>Shivaansh Aggarwal</td><td>24BCE0883</td></tr>
+    <tr><td>Devansh Sharma</td><td>24BCE0717</td></tr>
+  </table>
+</div>
+
+<h1>Performance Evaluation, Comparison and Conclusion</h1>
+<p>This document evaluates the adaptive scheduler of Review 2, compares it with existing systems, and gives the conclusion and future work. It also examines what happens when the predictions are wrong.</p>
+<div class="box">
+<p><b>What distinguishes this implementation</b></p>
+<ol>
+  <li><b>The prediction is used twice:</b> to order the ready queue (with ageing) and to resize the time quantum live; burst lengths are never assumed known.</li>
+  <li><b>An overrun guard</b> stops a burst that has clearly outrun its prediction from being treated as a short job.</li>
+  <li><b>A robustness evaluation:</b> a prediction-quality sweep and an intentionally adversarial workload (W7).</li>
+  <li><b>Paired statistical validation</b> of every main claim, with losses and negative results reported.</li>
+</ol>
+</div>
+
+<h2>1. Problem Statement and Motivation</h2>
+<h3>1.1 Why prediction errors are a weakness</h3>
+<p>Shortest-job-first gives the lowest average waiting time, but it needs the length of the next CPU burst, which the operating system does not know [@silb]. Predicting that length, classically by exponential averaging and here with a learned model, makes SJF-like ordering possible. A scheduler built this way, however, acts on each prediction as if it were true. When a burst runs longer than predicted, the scheduler has no better estimate than the original one, so the burst keeps its short estimate. Combined with time slicing, a long burst that was predicted to be short comes back to the ready queue after every quantum still looking short, and is chosen again ahead of genuinely short work. A process that runs many tiny bursts and then one long burst (a file loader followed by a compression step, for example) triggers exactly this. Work on algorithms with predictions states the general requirement: an algorithm should gain when predictions are good, and should not fail badly when they are wrong [@purohit], [@mitzsurvey]. Mitzenmacher studied the cost of misprediction for shortest-predicted-job-first in queues [@mitzitcs].</p>
+<p>This review therefore also asks how strongly the results depend on prediction accuracy, whether a mispredicted burst can be exploited and a simple guard prevents it, and which results remain significant under paired tests.</p>
+
+<h3>1.2 The overrun guard</h3>
+<p>The proposed scheduler orders the ready queue by P = (predicted time left in the burst) &minus; &beta; &times; (time waited), as described in Review 2. The guard changes only how the predicted time left is computed once a burst has clearly exceeded its prediction. Let <i>e</i> be the prediction, <i>d</i> the CPU time the burst has already received, and <i>r</i> the median ratio of actual to predicted burst length over the last 200 completed bursts (already collected by the quantum controller):</p>
+<p class="eq">time left = e &minus; d &nbsp; if d &le; e &middot; max(r, 1) (unchanged); &nbsp;&nbsp; otherwise time left = max(e, c &middot; d), &nbsp; c = 0.25</p>
+<p>The estimate never becomes shorter than the original prediction, and the longer a mispredicted burst keeps running, the further it falls in the order, in proportion to the CPU time it has used. This is a switch from prediction-based ordering to ordering by service received, the idea behind least-attained-service scheduling [@rai], applied only to bursts whose prediction has been shown to be wrong. <b>Example:</b> a burst predicted at 1.2 ms that has already run 40 ms is treated as having 10 ms left instead of 1.2 ms, so a new interactive burst predicted at 5 ms now runs first; after 200 ms it is treated as having 50 ms left. The guard is a separate configuration, <b>Adaptive-ML-G</b>; the original <b>Adaptive-ML</b> is unchanged and still reported.</p>
+
+<h2>2. Experimental Setup</h2>
+
+<h3>2.1 Runs and seeds</h3>
+<p>Every scheduler runs on exactly the same generated processes, so all comparisons are paired by seed. Three disjoint groups of seeds keep training, tuning and evaluation apart (Table 1). Re-running the 11 original configurations inside the extended comparison reproduced all 660 original results exactly.</p>
+<p class="tcaption">Table 1. Experiments and seeds</p>
+<table class="t10">
+  <tr><th>Experiment</th><th>Workloads</th><th>Configurations</th><th>Seeds</th><th class="n">Runs</th></tr>
+  <tr><td>Main comparison</td><td>W1&ndash;W6</td><td>11</td><td>0&ndash;9 (evaluation)</td><td class="n">660</td></tr>
+  <tr><td>Extended comparison with safeguards</td><td>W1&ndash;W7</td><td>14 (11 + 3 new)</td><td>0&ndash;9 (evaluation)</td><td class="n">980</td></tr>
+  <tr><td>Prediction-quality sweep</td><td>W4, W5</td><td>6 reference + 2 &times; 9 noise levels</td><td>0&ndash;9 (evaluation)</td><td class="n">480</td></tr>
+  <tr><td>Ablation, parameter sweeps, switch cost</td><td>W4 (and W5)</td><td>variants of Adaptive-ML</td><td>0&ndash;9 (evaluation)</td><td class="n">400</td></tr>
+  <tr><td>Tuning of &beta;, guard and persistent ageing</td><td>W1&ndash;W6 (&beta;), W1&ndash;W7</td><td>parameter grids</td><td>100&ndash;102 (tuning only)</td><td class="n">&ndash;</td></tr>
+  <tr><td>Training of the predictor</td><td>2,000 generated processes</td><td>&ndash;</td><td>1000&ndash;1004 (training only)</td><td class="n">&ndash;</td></tr>
+</table>
+
+<h3>2.2 Workloads, including the adversarial W7</h3>
+<p>W1 to W6 are the workloads of Review 2: CPU-bound, I/O-bound, interactive, mixed (40% interactive, 30% CPU-bound, 20% I/O-bound, 10% phase-changing), phase-changing, and the mixed workload at three times the arrival rate. Each has 200 processes at 85% offered CPU load. <b>W7 (bait-and-switch) is intentionally adversarial:</b> it was designed to expose the weakness described in Section 1.1, not to represent a typical system. It contains 50% interactive, 20% I/O-bound and 30% <i>bait</i> processes. A bait process runs 10&ndash;20 bursts of about 1 ms, then one burst with a median of 400 ms, twice, followed by a few short bursts. Although bait processes are 30% of the processes, they account for <b>76% of the CPU demand</b> on average (72&ndash;80% across the ten evaluation seeds). W7 is kept separate from W1&ndash;W6, so the main experiment is unchanged.</p>
+
+<h3>2.3 Metrics and statistical tests</h3>
+<p>For a process <i>i</i> with arrival time a<sub>i</sub>, completion time c<sub>i</sub>, time of first execution s<sub>i</sub>, total CPU time B<sub>i</sub> and total I/O time IO<sub>i</sub> [@silb]:</p>
+<p class="eq">Turnaround T<sub>i</sub> = c<sub>i</sub> &minus; a<sub>i</sub> &nbsp;&nbsp;&nbsp; Waiting W<sub>i</sub> = T<sub>i</sub> &minus; B<sub>i</sub> &minus; IO<sub>i</sub> &nbsp;&nbsp;&nbsp; Response R<sub>i</sub> = s<sub>i</sub> &minus; a<sub>i</sub></p>
+<p>Also recorded: worst-case and 95th-percentile waiting time, context switches, CPU utilisation, throughput, Jain's fairness index [@jain] on each process's progress rate (B<sub>i</sub> + IO<sub>i</sub>) / T<sub>i</sub>, starved processes (waiting more than five times the average wait of the 11 original schedulers on that instance), and prediction error (MAE, RMSE). The share of the gap to the oracle (SRTF with true burst lengths) that a scheduler closes is (W<sub>SJF-EMA</sub> &minus; W<sub>proposed</sub>) / (W<sub>SJF-EMA</sub> &minus; W<sub>oracle</sub>).</p>
+<p><b>Statistics.</b> Each comparison uses the ten paired seeds. The change is 100 &times; (mean<sub>new</sub> / mean<sub>reference</sub> &minus; 1); its 95% confidence interval is a percentile bootstrap over seeds with 10,000 resamples [@efron]; the p-value is the exact two-sided Wilcoxon signed-rank test [@wilcoxon], corrected for multiple comparisons with the Holm method [@holm] within each family of related tests. A difference is called <b>significant only when the Holm-corrected p is below 0.05</b>. With ten seeds the smallest possible exact p-value is 0.002, so families are kept to at most 14 tests.</p>
+
+<h3>2.4 Choice of parameters</h3>
+<p>No parameter was chosen on evaluation seeds. &beta; = 0.03, the guard and the persistent-ageing variant (Section 4.4) were all tuned on seeds 100&ndash;102, the last two on W1&ndash;W7 with the score (average wait / SJF average wait + worst wait / SJF worst wait) / 2 (full grid: <code>python tune_innovation.py</code>, shown in the guide). The chosen values were c = 0.25 with the median ratio (score 0.899 against 0.937 for Adaptive-ML) and &beta; = 0.01 for persistent ageing (0.890). The first guard version used c &middot; d without the max(e, &middot;) floor, which could make a burst look shorter than its estimate; it was corrected and re-tuned before any evaluation run. Since W7 was in the tuning set, the guard was not tuned blind to the attack; only the evaluation seeds are independent.</p>
+
+<h2>3. Performance Evaluation</h2>
+
+<h3>3.1 Average waiting time</h3>
+<p>Table 2 gives the average waiting time of every configuration on every workload.</p>
+<p class="tcaption">Table 2. Average waiting time in ms (mean of 10 evaluation seeds)</p>
+<table class="t10 long">
+<thead>  <tr><th>Scheduler</th><th class="n">W1 CPU</th><th class="n">W2 I/O</th><th class="n">W3 Inter.</th><th class="n">W4 Mixed</th><th class="n">W5 Phase</th><th class="n">W6 Overload</th><th class="n">W7 Bait</th></tr></thead>
+  <tr><td>FCFS</td><td class="n">2,356</td><td class="n">454</td><td class="n">490</td><td class="n">4,003</td><td class="n">4,330</td><td class="n">38,210</td><td class="n">3,630</td></tr>
+  <tr><td>SJF-EMA</td><td class="n">2,778</td><td class="n">395</td><td class="n">480</td><td class="n">2,460</td><td class="n">6,269</td><td class="n">17,150</td><td class="n">3,847</td></tr>
+  <tr><td>SRTF-EMA</td><td class="n">2,881</td><td class="n">432</td><td class="n">489</td><td class="n">1,729</td><td class="n">6,830</td><td class="n">16,490</td><td class="n">4,045</td></tr>
+  <tr><td>RR-2</td><td class="n">3,478</td><td class="n">556</td><td class="n">608</td><td class="n">2,394</td><td class="n">7,675</td><td class="n">22,998</td><td class="n">1,915</td></tr>
+  <tr><td>RR-5</td><td class="n">2,931</td><td class="n">470</td><td class="n">523</td><td class="n">2,180</td><td class="n">6,576</td><td class="n">23,615</td><td class="n">1,741</td></tr>
+  <tr><td>RR-10</td><td class="n">2,755</td><td class="n">460</td><td class="n">498</td><td class="n">2,276</td><td class="n">6,127</td><td class="n">26,088</td><td class="n">1,798</td></tr>
+  <tr><td>RR-20</td><td class="n">2,661</td><td class="n">454</td><td class="n">488</td><td class="n">2,572</td><td class="n">5,713</td><td class="n">30,333</td><td class="n">1,991</td></tr>
+  <tr><td>MLFQ</td><td class="n">2,814</td><td class="n">503</td><td class="n">542</td><td class="n">1,878</td><td class="n">6,566</td><td class="n">22,762</td><td class="n">1,495</td></tr>
+  <tr><td>Oracle (true bursts)</td><td class="n">1,697</td><td class="n">370</td><td class="n">283</td><td class="n">1,204</td><td class="n">4,617</td><td class="n">12,820</td><td class="n">760</td></tr>
+  <tr><td>Adaptive-EMA</td><td class="n">2,915</td><td class="n">423</td><td class="n">487</td><td class="n">1,851</td><td class="n">6,569</td><td class="n">18,017</td><td class="n">3,232</td></tr>
+  <tr><td><b>Adaptive-ML (proposed)</b></td><td class="n"><b>2,725</b></td><td class="n"><b>450</b></td><td class="n"><b>505</b></td><td class="n"><b>1,786</b></td><td class="n"><b>6,163</b></td><td class="n"><b>17,599</b></td><td class="n"><b>2,083</b></td></tr>
+  <tr><td><b>Adaptive-ML-G (with guard)</b></td><td class="n"><b>2,720</b></td><td class="n"><b>451</b></td><td class="n"><b>496</b></td><td class="n"><b>1,786</b></td><td class="n"><b>6,139</b></td><td class="n"><b>17,318</b></td><td class="n"><b>1,634</b></td></tr>
+  <tr><td>Adaptive-ML-A (persistent ageing)</td><td class="n">2,742</td><td class="n">419</td><td class="n">485</td><td class="n">1,770</td><td class="n">6,204</td><td class="n">20,682</td><td class="n">3,149</td></tr>
+  <tr><td>Adaptive-ML-GA (both)</td><td class="n">2,741</td><td class="n">425</td><td class="n">486</td><td class="n">1,768</td><td class="n">6,199</td><td class="n">19,371</td><td class="n">1,640</td></tr>
+</table>
+<p>The clearest result is on the mixed workload W4. The proposed scheduler waits 1,786 ms against 2,460 ms for SJF with exponential averaging, a reduction of <b>27.4%</b> (95% CI &minus;32.4% to &minus;23.7%, Holm p = 0.023, better on 10 of 10 seeds), closing 54% of the gap to the oracle. On W1 and W5 the differences from SJF-EMA (&minus;1.9% and &minus;1.7%) are not significant. It is worse on the I/O-bound workload W2 by 13.8%, which is significant (0 of 10 seeds better), and on W3 (+5.3%) and W6 (+2.6%), where the losses are not significant after correction. The falsification rule fixed in Review 1 (mean paired improvement larger than one standard deviation) gives the same verdict: it holds on W4 (674 ms against 117 ms) and not on W5 (106 ms against 615 ms).</p>
+
+<h3>3.2 Worst-case waiting time and starvation</h3>
+<p>Thanks to the ageing term, the worst-case wait falls compared with SJF-EMA by 56% on W1, 27% on W3, 23% on W4 and 53% on W5, all significant after correction. On W5 the number of starved processes per run drops from 7.7 with SJF-EMA to 0.2.</p>
+
+<h3>3.3 Context switches and response time</h3>
+<p>On W4, Round Robin with a 2 ms quantum gives a fast first response but 34,354 context switches per run, while a 20 ms quantum cuts them to 6,542 and raises the average response time to 69 ms. The proposed scheduler needs 5,933 switches, 61% fewer than RR with a 5 ms quantum, with an average response time of 15 ms. When the cost of a context switch was raised from 0.1 ms to 0.5 ms, its average wait on W4 grew by 20%, compared with 53% for MLFQ and 62% for RR-5.</p>
+
+<h3>3.4 Prediction accuracy and adaptation of the quantum</h3>
+<p>The learned model, a gradient boosting regressor [@friedman] built with scikit-learn [@sklearn], has a 12&ndash;22% lower prediction error (MAE) than exponential averaging on all six workloads; on W4 it is 9.11 ms against 10.62 ms. On a workload whose mix changes every 30 seconds, the quantum stays around 6 ms for interactive processes, climbs towards the 100 ms limit for CPU-bound processes (peaking at about 97 ms) and drops to about 3.4 ms for I/O-bound processes, close to the theoretical 80th percentile of their bursts (3.2 ms); the trace is shown in the project guide.</p>
+
+<h3>3.5 Ablation study</h3>
+<p class="tcaption">Table 3. Ablation results in ms (mean of 10 seeds)</p>
+<table class="t10">
+  <tr><th>Variant</th><th class="n">W4 avg wait</th><th class="n">W4 worst wait</th><th class="n">W5 avg wait</th><th class="n">W5 worst wait</th></tr>
+  <tr><td><b>Full scheduler</b></td><td class="n"><b>1,786</b></td><td class="n"><b>18,388</b></td><td class="n"><b>6,163</b></td><td class="n"><b>25,831</b></td></tr>
+  <tr><td>Without ageing</td><td class="n">1,643</td><td class="n">23,182</td><td class="n">6,196</td><td class="n">53,915</td></tr>
+  <tr><td>Fixed 10 ms quantum</td><td class="n">1,763</td><td class="n">20,138</td><td class="n">6,864</td><td class="n">39,254</td></tr>
+  <tr><td>Without class modulation</td><td class="n">1,807</td><td class="n">18,898</td><td class="n">6,238</td><td class="n">27,875</td></tr>
+  <tr><td>Without online refit</td><td class="n">1,833</td><td class="n">17,766</td><td class="n">6,134</td><td class="n">25,482</td></tr>
+  <tr><td>Prediction only (ML-predicted SJF)</td><td class="n">2,336</td><td class="n">22,759</td><td class="n">6,325</td><td class="n">53,593</td></tr>
+  <tr><td>SJF-EMA (reference)</td><td class="n">2,460</td><td class="n">23,766</td><td class="n">6,269</td><td class="n">55,480</td></tr>
+</table>
+<p>Removing ageing lowers the W4 average a little, but the worst case rises by 26% on W4 and doubles on W5. Fixing the quantum at 10 ms on W5 raises the average by 11% and the worst case by 52%. The better prediction alone (plain SJF with the learned model) improves on SJF-EMA by only 5% on W4; most of the gain comes from using the prediction in both places. Class modulation and online refit change the average by less than 3%.</p>
+
+<h3>3.6 Other metrics</h3>
+<p>CPU utilisation (0.81&ndash;0.82) and throughput (2.17&ndash;2.20 processes per second) are practically the same for every scheduler on W4, as expected. The proposed scheduler has a lower 95th-percentile wait than SJF-EMA (9,407 against 10,314 ms) and fewer starved processes per run (6.7 against 9.1), but RR-5 (8,361 ms, 3.4) and MLFQ (8,565 ms, 3.9) are lower on both. Its Jain fairness index is slightly lower than SJF-EMA's (0.816 against 0.829), and the same holds on every other workload except W3. One prediction took 0.50 ms in the isolated benchmark and about 1.2 ms inside the parallel experiment, against about 1 &micro;s for exponential averaging.</p>
+
+<h2>4. Robustness to Prediction Errors</h2>
+
+<h3>4.1 How much prediction quality matters</h3>
+<p>To separate the quality of the predictor from the quality of the scheduling mechanism, a <i>noisy oracle</i> was added for diagnosis only: it reads the true burst length and multiplies it by exp(&sigma;Z), with Z standard normal, so &sigma; = 0 is a perfect predictor. It is a measuring device, never a usable scheduler. The same noisy predictions were given to the full proposed mechanism (same quantum, ageing and classifier) and to plain SJF, for nine values of &sigma; (Fig. 1).</p>
+<ul>
+  <li><b>On W4 the mechanism matters more than the predictor.</b> With identical perfect predictions, the proposed mechanism waits 1,384 ms against 1,934 ms for SJF, 28.4% less (10 of 10 seeds, Holm p = 0.012).</li>
+  <li><b>Better prediction would still help on W4.</b> With the real learned model the scheduler waits 1,786 ms; perfect predictions would lower this by 22.5%. Adaptive-ML is 7.7% better than SJF with perfect predictions, but this is not significant (Holm p = 0.105), so it is not claimed.</li>
+  <li><b>Real errors cost more than random errors of the same size.</b> The learned model's measured error spread is &sigma; = 1.25, but its waiting time matches the noisy-oracle curve at &sigma; = 1.86. Real errors are systematic (long bursts are under-predicted towards the average), while the noisy oracle's errors are random around the truth.</li>
+  <li><b>On W5 prediction quality barely matters.</b> The curve is almost flat (5,057 ms at &sigma; = 0, 5,240 ms at &sigma; = 2), and with perfect predictions the mechanism is 9.0% worse than SJF (4,641 ms): on phase-changing work the time slicing itself is the bottleneck.</li>
+</ul>
+<figure class="pq">
+<img src="../../../figures/innovation/innov1_prediction_quality.png" alt="Prediction-quality sweep">
+<figcaption>Fig. 1. Average waiting time as prediction error grows (shading: 95% interval of the 10-seed mean); the real predictors are placed at their measured error</figcaption>
+</figure>
+
+<h3>4.2 The adversarial workload W7 and the overrun guard</h3>
+<p>Table 4 shows who pays for the long bait bursts. Without the guard, the proposed scheduler loses to Round Robin and MLFQ on W7: honest interactive processes wait 1,399 ms on average, because long bait bursts keep returning with a short estimate.</p>
+<p class="tcaption">Table 4. W7 bait-and-switch: waiting time by process kind in ms (mean of 10 seeds)</p>
+<table class="t10 w7">
+  <tr><th>Scheduler</th><th class="n">Interactive wait</th><th class="n">Interactive response</th><th class="n">I/O-bound wait</th><th class="n">Bait wait</th><th class="n">Avg wait (all)</th><th class="n">Worst wait</th><th class="n">Starved / run</th></tr>
+  <tr><td>SJF-EMA</td><td class="n">4,149</td><td class="n">385.5</td><td class="n">2,719</td><td class="n">4,169</td><td class="n">3,847</td><td class="n">13,766</td><td class="n">3.4</td></tr>
+  <tr><td>SRTF-EMA</td><td class="n">4,472</td><td class="n">409.2</td><td class="n">2,472</td><td class="n">4,520</td><td class="n">4,045</td><td class="n">15,811</td><td class="n">5.6</td></tr>
+  <tr><td>RR-5</td><td class="n">796</td><td class="n">19.7</td><td class="n">865</td><td class="n">3,977</td><td class="n">1,741</td><td class="n">9,803</td><td class="n">0.0</td></tr>
+  <tr><td>MLFQ</td><td class="n">443</td><td class="n">2.5</td><td class="n">237</td><td class="n">4,188</td><td class="n"><b>1,495</b></td><td class="n">10,536</td><td class="n">0.0</td></tr>
+  <tr><td>Oracle</td><td class="n">26.5</td><td class="n">0.5</td><td class="n">13.0</td><td class="n">2,545</td><td class="n">760</td><td class="n">16,758</td><td class="n">1.9</td></tr>
+  <tr><td>Adaptive-ML</td><td class="n">1,399</td><td class="n">97.3</td><td class="n">504</td><td class="n">4,378</td><td class="n">2,083</td><td class="n">21,382</td><td class="n">4.0</td></tr>
+  <tr><td><b>Adaptive-ML-G</b></td><td class="n"><b>112</b></td><td class="n"><b>5.8</b></td><td class="n"><b>94.9</b></td><td class="n">5,349</td><td class="n"><b>1,634</b></td><td class="n">20,283</td><td class="n">6.9</td></tr>
+</table>
+<p>With the guard, the average wait on W7 falls by <b>21.5%</b> (95% CI &minus;26.3% to &minus;17.7%, 10 of 10 seeds, Holm p = 0.027), and honest interactive processes wait <b>92% less</b> (1,399 to 112 ms; response time 97.3 to 5.8 ms). Their wait is also 86% lower than under RR-5 and 75% lower than under MLFQ (both significant). The cost is borne by the bait processes, which wait 22% longer, and the trade-offs are clear: <b>MLFQ still has the lowest average wait on W7</b> (1,495 ms, 9.3% below the guard, significant), the worst-case wait with the guard is about twice that of RR-5 and MLFQ (20,283 against 9,803 and 10,536 ms), and starved processes per run rise from 4.0 to 6.9. Against RR-5 the guard's average wait is 6.2% lower, but this is only just significant (Holm p = 0.049).</p>
+<figure class="term">
+<img src="../../terminal/11_demo_w7.png" alt="W7 demo">
+<figcaption>Fig. 2. Real output of python demo_innovation.py on W7 (one seed): the guard protects interactive processes</figcaption>
+</figure>
+
+<h3>4.3 Effect of the guard on the ordinary workloads</h3>
+<p>On W1&ndash;W5 the guard changes the average wait by between &minus;1.8% and +0.1%, none significant after correction; on W6 it lowers it by 1.6% (significant). The worst-case wait rises by 5.6% on W4 (95% CI +2.2% to +9.5%) and by 8.1% on W3; both have unadjusted p-values of 0.027 and 0.084 and are not significant after correction, but they show the direction of the cost (Fig. 3).</p>
+<figure class="wide">
+<img src="../../../figures/innovation/innov2_safeguards.png" alt="Safeguards">
+<figcaption>Fig. 3. Change of each safeguard against Adaptive-ML on W1&ndash;W7 (bars: 95% bootstrap confidence intervals)</figcaption>
+</figure>
+
+<h3>4.4 Persistent ageing: a negative result</h3>
+<p>The ageing term counts the time since a process last entered the ready queue, which restarts after every time slice, while starvation is measured on total waiting. On the tuning seeds the reset discards 70% of the ready-queue waiting on W4 (84% for the ten worst-off processes); on average the longest burst of a run passes through 58 queue stays on W4 and 181 on W7. A persistent variant (Adaptive-ML-A, &beta; re-tuned to 0.01) counts all waiting since the burst started. It improves W2 by 6.9% (significant) and the worst-case wait on W7 by 41% (not significant after correction, Holm p = 0.064), but it raises the average wait by 17.5% on W6 and by 51.2% on W7, and honest interactive processes on W7 wait 152% longer: the credit favours exactly the long, mispredicted bait bursts. Combining it with the guard (Adaptive-ML-GA) keeps the guard's W7 gain (&minus;21.3%) but still costs 10.1% on W6 (Holm p = 0.051, 1 of 10 seeds better). <b>Persistent ageing is therefore not retained</b> in the recommended configuration; the reset is a real mismatch with the stated intent, but fixing it this way makes average waiting time worse.</p>
+
+<h2>5. Statistical Validation and Hypotheses</h2>
+<p class="tcaption">Table 5. Main claims with paired statistics (10 evaluation seeds)</p>
+<table class="t10 long">
+<thead>  <tr><th>Claim</th><th class="n">Change</th><th class="n">95% CI</th><th class="n">Holm p</th><th class="n">Seeds better</th><th>Verdict</th></tr></thead>
+  <tr><td>W4 avg wait, Adaptive-ML vs SJF-EMA</td><td class="n">&minus;27.4%</td><td class="n">&minus;32.4, &minus;23.7</td><td class="n">0.023</td><td class="n">10/10</td><td>Significant</td></tr>
+  <tr><td>W2 avg wait, Adaptive-ML vs SJF-EMA</td><td class="n">+13.8%</td><td class="n">+9.7, +16.9</td><td class="n">0.023</td><td class="n">0/10</td><td>Significant loss</td></tr>
+  <tr><td>W1, W3, W5, W6 avg wait vs SJF-EMA</td><td class="n">&minus;1.9 to +5.3%</td><td class="n">&ndash;</td><td class="n">&ge; 0.387</td><td class="n">&ndash;</td><td>Not significant</td></tr>
+  <tr><td>Worst wait vs SJF-EMA on W1, W3, W4, W5</td><td class="n">&minus;22.6 to &minus;56.0%</td><td class="n">all below 0</td><td class="n">&le; 0.031</td><td class="n">9&ndash;10/10</td><td>Significant</td></tr>
+  <tr><td>W4 avg wait, Adaptive-ML vs RR-5</td><td class="n">&minus;18.1%</td><td class="n">&minus;20.2, &minus;14.9</td><td class="n">0.012</td><td class="n">10/10</td><td>Significant</td></tr>
+  <tr><td>W4 avg wait, Adaptive-ML vs MLFQ</td><td class="n">&minus;4.9%</td><td class="n">&minus;7.6, &minus;0.5</td><td class="n">0.160</td><td class="n">6/10</td><td>Not significant</td></tr>
+  <tr><td>W4, perfect predictions: our mechanism vs SJF</td><td class="n">&minus;28.4%</td><td class="n">&minus;33.8, &minus;24.3</td><td class="n">0.012</td><td class="n">10/10</td><td>Significant</td></tr>
+  <tr><td>W7 avg wait, guard vs Adaptive-ML</td><td class="n">&minus;21.5%</td><td class="n">&minus;26.3, &minus;17.7</td><td class="n">0.027</td><td class="n">10/10</td><td>Significant</td></tr>
+  <tr><td>W7 interactive wait, guard vs Adaptive-ML</td><td class="n">&minus;92.0%</td><td class="n">&minus;92.8, &minus;90.9</td><td class="n">0.023</td><td class="n">10/10</td><td>Significant</td></tr>
+  <tr><td>W7 avg wait, guard vs MLFQ</td><td class="n">+9.3%</td><td class="n">+4.5, +15.3</td><td class="n">0.018</td><td class="n">1/10</td><td>Significant loss</td></tr>
+  <tr><td>W7 worst wait, guard vs RR-5</td><td class="n">+106.9%</td><td class="n">+92.5, +118.0</td><td class="n">0.018</td><td class="n">0/10</td><td>Significant loss</td></tr>
+  <tr><td>W4 worst wait, guard vs Adaptive-ML</td><td class="n">+5.6%</td><td class="n">+2.2, +9.5</td><td class="n">0.328</td><td class="n">2/10</td><td>Not significant after correction</td></tr>
+  <tr><td>W6 avg wait, persistent ageing vs Adaptive-ML</td><td class="n">+17.5%</td><td class="n">+12.7, +22.3</td><td class="n">0.027</td><td class="n">0/10</td><td>Significant loss</td></tr>
+</table>
+<p>The seven hypotheses H1&ndash;H7 were stated in Review 1, before any experiment (Table 6). The guard, the noisy oracle and W7 were designed later, so their results are reported as additional findings and not as tests of a hypothesis fixed in advance.</p>
+<p class="tcaption">Table 6. Hypotheses stated in Review 1, and what was observed</p>
+<table class="long t10">
+<thead>  <tr><th style="width:5%">#</th><th style="width:46%">Hypothesis</th><th>Observed</th></tr></thead>
+  <tr><td>H1</td><td>Lower average wait than SJF-EMA on W4, W5 and W6, largest on W5</td><td>Partly: clearly on W4 (&minus;27%, significant); W5 (&minus;2%) and W6 (+3%) not significant</td></tr>
+  <tr><td>H2</td><td>Far fewer context switches than small-quantum RR, with response time closer to small-quantum than to large-quantum RR</td><td>Supported: on W4, 5,933 switches against 15,328 (RR-5); response 15.4 ms against 11.4 (RR-2) and 69.3 (RR-20)</td></tr>
+  <tr><td>H3</td><td>Lower worst-case wait than SJF and SRTF, because of ageing</td><td>Partly: on 5 of 6 workloads (not W2)</td></tr>
+  <tr><td>H4</td><td>About the same as SJF-EMA on the uniform workloads W1 and W2</td><td>Partly: W1 yes (&minus;2%), W2 no (+14%, significant)</td></tr>
+  <tr><td>H5</td><td>Does not beat the oracle on average wait</td><td>Supported (0 of 60 instances)</td></tr>
+  <tr><td>H6</td><td>Lower prediction MAE than exponential averaging on W5, roughly comparable on W1</td><td>Supported on W5 (27.1 against 31.8 ms); on W1 the model was 12% better rather than comparable</td></tr>
+  <tr><td>H7</td><td>Removing ageing slightly lowers the average but raises the worst case and starvation</td><td>Partly: W4 yes; on W5 the average does not drop, but the worst case doubles and starved processes rise from 0.2 to 8.0</td></tr>
+</table>
+
+<h2>6. Comparison with Existing Systems</h2>
+
+<h3>6.1 Against the classical algorithms</h3>
+<p class="tcaption">Table 7. Comparison on the mixed workload W4 (mean of 10 seeds)</p>
+<table class="t10 long">
+<thead>  <tr><th>Scheduler</th><th class="n">Avg wait (ms)</th><th class="n">Worst wait (ms)</th><th class="n">Response (ms)</th><th class="n">Switches</th><th class="n">Proposed avg wait vs this</th></tr></thead>
+  <tr><td>FCFS</td><td class="n">4,003</td><td class="n">19,407</td><td class="n">240</td><td class="n">3,962</td><td class="n">&minus;55.4%</td></tr>
+  <tr><td>SJF-EMA</td><td class="n">2,460</td><td class="n">23,766</td><td class="n">71.3</td><td class="n">3,977</td><td class="n">&minus;27.4%</td></tr>
+  <tr><td>SRTF-EMA</td><td class="n">1,729</td><td class="n">24,903</td><td class="n">7.3</td><td class="n">6,902</td><td class="n">+3.3%</td></tr>
+  <tr><td>RR-2</td><td class="n">2,394</td><td class="n">16,996</td><td class="n">11.4</td><td class="n">34,354</td><td class="n">&minus;25.4%</td></tr>
+  <tr><td>RR-5</td><td class="n">2,180</td><td class="n">14,887</td><td class="n">23.3</td><td class="n">15,328</td><td class="n">&minus;18.1%</td></tr>
+  <tr><td>RR-10</td><td class="n">2,276</td><td class="n">14,117</td><td class="n">40.8</td><td class="n">9,365</td><td class="n">&minus;21.5%</td></tr>
+  <tr><td>RR-20</td><td class="n">2,572</td><td class="n">13,386</td><td class="n">69.3</td><td class="n">6,542</td><td class="n">&minus;30.6%</td></tr>
+  <tr><td>MLFQ</td><td class="n">1,878</td><td class="n">15,016</td><td class="n">2.8</td><td class="n">11,888</td><td class="n">&minus;4.9%</td></tr>
+  <tr><td><b>Adaptive-ML (proposed)</b></td><td class="n"><b>1,786</b></td><td class="n"><b>18,388</b></td><td class="n"><b>15.4</b></td><td class="n"><b>5,933</b></td><td class="n">&ndash;</td></tr>
+</table>
+<p>On W4 the proposed scheduler beats every classical algorithm on average wait except SRTF-EMA, which is 3% better (not significant) but has a 35% higher worst case and 16% more switches, because it preempts whenever a newly ready process has a shorter predicted remaining time and has no ageing. MLFQ is close (4.9%, not significant) and responds faster, but needs twice as many switches; Round Robin with 5&ndash;20 ms quanta keeps a lower worst case. On W5, plain FCFS beats even the oracle (4,330 against 4,617 ms): with many bursts per process, shortest-burst-first repeatedly delays processes in their long phase, so the oracle is a strong reference, not an absolute lower bound.</p>
+<p>The adversarial W7 changes the picture in an instructive way. MLFQ, which demotes any process that uses its whole quantum, has the lowest average wait there (1,495 ms), and SJF-EMA and SRTF-EMA, which trust their estimates, are worst among the practical schedulers (3,847 and 4,045 ms). The guard brings the proposed scheduler from 2,083 to 1,634 ms, below Round Robin but still above MLFQ, while giving interactive processes the shortest waits of any practical scheduler.</p>
+
+<h3>6.2 Against approaches from the literature</h3>
+<p class="tcaption">Table 8. Comparison with related approaches</p>
+<table class="long t10">
+<thead>  <tr><th style="width:22%">Approach</th><th style="width:15%">Burst lengths needed in advance</th><th style="width:16%">Burst prediction</th><th style="width:16%">Time quantum</th><th>When the prediction is wrong</th></tr></thead>
+  <tr><td>Round Robin [@silb]</td><td>No</td><td>None</td><td>Fixed</td><td>Not applicable; quantum chosen by hand</td></tr>
+  <tr><td>SJF with exponential averaging [@silb]</td><td>No</td><td>Exponential average</td><td>None</td><td>Long burst keeps a short estimate; can starve others</td></tr>
+  <tr><td>MLFQ [@ostep], [@corbato]</td><td>No</td><td>Implicit (demotion)</td><td>Fixed per level</td><td>Demotes by CPU time used; many switches</td></tr>
+  <tr><td>Dynamic-quantum RR: SARR [@matarneh], mean-average [@noon], PBDRR [@pbdrr]</td><td>Yes</td><td>None</td><td>Median / mean of bursts, per process</td><td>Assumes known burst times</td></tr>
+  <tr><td>ML time slices in Linux [@negi]</td><td>No</td><td>C4.5 per known program</td><td>Per program</td><td>Not addressed</td></tr>
+  <tr><td>Fuzzy burst prediction [@pourali]</td><td>No</td><td>Fuzzy inference</td><td>None</td><td>Not addressed</td></tr>
+  <tr><td>Preferential round robin [@purohit]</td><td>No</td><td>Any predictor</td><td>Processor sharing</td><td>Proven bound, single-burst jobs without I/O</td></tr>
+  <tr><td><b>Proposed scheduler</b></td><td><b>No</b></td><td><b>Gradient boosting, 12 features</b></td><td><b>80th percentile of predictions, adjusted live</b></td><td><b>Overrun guard and ageing; tested empirically on W7</b></td></tr>
+</table>
+<p>Unlike the dynamic Round Robin variants [@matarneh], [@noon], [@pbdrr], [@helmy], the proposed scheduler never assumes that burst lengths are known; it predicts them and corrects the quantum using its own prediction errors. Proportional-share methods such as lottery scheduling [@lottery] aim at fairness rather than waiting time. Compared with earlier prediction work [@negi], [@pourali], the prediction is used both for ordering and for the quantum, and the behaviour under wrong predictions is measured rather than assumed. The algorithms-with-predictions literature [@purohit], [@mitzsurvey], [@mitzitcs] provides guarantees for simpler models (single-burst jobs, no I/O); here no such guarantee is claimed, and the guard is evaluated only experimentally. Unlike whole-job run-time prediction [@smith], [@tsafrir] and heavier learning methods [@mao16], [@mao19], [@kahu], the approach works on individual CPU bursts and stays light, which addresses the overhead concern in [@zhang], though it is still more costly than the Linux fair-share scheduler [@cfs].</p>
+
+<h2>7. Conclusion</h2>
+<p>Using the predicted burst both to order the ready queue and to size the time quantum makes a measurable difference on mixed workloads: 27.4% less waiting than SJF with exponential averaging (significant, every seed), a 23% lower worst case and 61% fewer context switches than RR-5. The prediction-quality sweep showed that the gain comes mainly from the mechanism, and that real prediction errors cost more than random ones of the same size.</p>
+<p>The evaluation also exposed a weakness shared by prediction-based schedulers: a burst that outruns its prediction keeps looking short, which made the scheduler lose to Round Robin and MLFQ on the adversarial W7. The overrun guard cut W7's average wait by 21.5% and interactive waiting by 92%, with no significant change on W1&ndash;W5, but it is not a complete defence: MLFQ is still better on W7's average and much better on its worst case. The scheduler also loses significantly on the all-I/O workload, its fairness index is slightly below SJF-EMA's, and persistent ageing was not retained. The recommended configuration is Adaptive-ML with the overrun guard.</p>
+
+<h2>8. Future Work</h2>
+<ul>
+  <li><b>Real workloads:</b> burst traces from real programs, which would also give the online refit a genuine distribution shift.</li>
+  <li><b>Stronger robustness:</b> other adversarial patterns, a worst-case bound for the guard, and a lower worst case on W7.</li>
+  <li><b>Better ageing:</b> load-aware ageing, and a persistent credit that does not favour mispredicted long bursts.</li>
+  <li><b>Kernel implementation:</b> a small tree or lookup table instead of a 0.5 ms model, inside xv6 [@xv6]; later, multi-core scheduling.</li>
+</ul>
+
+<h2>References</h2>
+<div class="refs">
+@REFERENCES@
+</div>
+
+</body>
+</html>

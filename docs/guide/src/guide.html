@@ -40,6 +40,7 @@
   <li>The prediction model</li>
   <li>The adaptive scheduler in detail, with worked examples</li>
   <li>Experiments and evaluation pipeline</li>
+  <li>Robustness to prediction errors: the overrun guard, W7 and statistics</li>
   <li>Results and what they mean</li>
   <li>How to run everything</li>
   <li>Where everything is saved</li>
@@ -52,6 +53,7 @@
 <p><b>Why.</b> SJF gives the lowest average waiting time but needs the next burst length, which nobody knows in advance. The usual estimate, exponential averaging, reacts slowly when a process changes behaviour. Round Robin needs a quantum, and the textbook rule for choosing one (about 80% of bursts should finish within one quantum) is normally applied once by a person and never revisited.</p>
 <p><b>How it was built.</b> Everything is in Python. A discrete-event simulator models one CPU with processes that alternate CPU bursts and I/O. Eleven scheduler configurations run on exactly the same workloads: FCFS, SJF, SRTF, Round Robin (four quanta), MLFQ, an oracle that knows the future, and two versions of the proposed scheduler. A gradient-boosting model, trained on generated process histories, predicts the next burst.</p>
 <p><b>Result in one line.</b> On the mixed workload, the realistic case, the proposed scheduler cuts average waiting time by <b>27%</b> compared with SJF using exponential averaging. It is better on all 10 seeds, closes <b>54%</b> of the gap to the oracle, lowers the worst-case wait by <b>23%</b>, and uses <b>61%</b> fewer context switches than Round Robin with a 5 ms quantum. It does not help on workloads made only of short random bursts, and the documents say so openly.</p>
+<p><b>What happens when the prediction is wrong.</b> A burst that runs longer than predicted keeps its short estimate, so with time slicing it returns to the ready queue looking short again and again. An <b>overrun guard</b> fixes this: once a burst clearly outruns its prediction, its estimated time left becomes max(prediction, 0.25 &times; CPU time used). On the intentionally adversarial <b>W7 bait-and-switch</b> workload the guard cuts the average wait by <b>21.5%</b> and interactive waiting by <b>92%</b>, with no significant change on W1&ndash;W5. MLFQ still has a lower average wait on W7, and a second idea, persistent ageing, made average waits worse and was not kept. Every main claim is checked with paired statistical tests.</p>
 
 <h2>2. Concepts used in the project</h2>
 <table class="compact long">
@@ -67,14 +69,18 @@
   <tr><td>Round Robin (RR), quantum</td><td>Each process gets at most q ms, then goes to the back of the queue.</td></tr>
   <tr><td>MLFQ</td><td>Multilevel feedback queue: processes that use their whole quantum drop a level; periodic boost avoids starvation.</td></tr>
   <tr><td>Starvation, ageing</td><td>A process waiting forever; ageing improves a process's priority the longer it waits.</td></tr>
-  <tr><td>Oracle</td><td>SRTF that knows every true burst length. The best-case reference, impossible in practice.</td></tr>
+  <tr><td>Oracle</td><td>SRTF that knows every true burst length: a reference that uses information no real scheduler has. Not a lower bound when processes have many bursts (FCFS beats it on W5).</td></tr>
   <tr><td>MAE</td><td>Mean absolute error of the burst prediction, in ms.</td></tr>
-  <tr><td>Seed</td><td>A number that fixes the random workload, so a run can be repeated exactly.</td></tr>
+  <tr><td>Seed</td><td>A number that fixes the random workload, so a run can be repeated exactly. Seeds 1000&ndash;1004 train the model, 100&ndash;102 tune parameters, 0&ndash;9 evaluate.</td></tr>
+  <tr><td>Overrun guard</td><td>Once a burst has run longer than its prediction &times; the median observed actual/predicted ratio, its time left is taken as max(prediction, 0.25 &times; CPU time used), so it stops looking like a short job.</td></tr>
+  <tr><td>Noisy oracle</td><td>A diagnostic predictor that reads the true burst and multiplies it by exp(&sigma;Z). Used only to measure how much prediction quality matters; never a real scheduler.</td></tr>
+  <tr><td>W7 bait-and-switch</td><td>An intentionally adversarial workload: 30% of processes run many ~1 ms bursts and then one ~400 ms burst. They are 76% of the CPU demand.</td></tr>
+  <tr><td>Paired test, CI, Holm</td><td>Each comparison uses the same 10 seeds for both schedulers. 95% confidence intervals come from a bootstrap; p-values from the exact Wilcoxon signed-rank test, Holm-corrected. Significant means Holm p &lt; 0.05.</td></tr>
 </table>
 
 <h2>3. Architecture</h2>
 <p>The key design decision is that the <b>simulation engine never makes a scheduling decision</b>. It owns the clock, the event queue and the process control blocks (PCBs), and whenever a decision is needed it calls the <b>policy interface</b>. Any scheduler that implements the interface can be plugged in. This guarantees that every scheduler is tested on identical arrivals, bursts, I/O times and switch costs, so differences in the results come only from the decisions.</p>
-<p>Inside the adaptive scheduler, the <b>feature extractor</b> turns a process's history into 12 numbers, the <b>burst predictor</b> estimates the next burst, the <b>classifier</b> labels the process type, the <b>ready-queue ordering</b> applies the ageing formula, and the <b>quantum controller</b> recomputes the time slice. When a burst completes, the <b>feedback loop</b> records the error and stores the example for refitting. After a run, the <b>metrics collector</b> computes all measures and the <b>analysis</b> step produces tables and figures.</p>
+<p>Inside the adaptive scheduler, the <b>feature extractor</b> turns a process's history into 12 numbers, the <b>burst predictor</b> estimates the next burst, the <b>classifier</b> labels the process type, the <b>ready-queue ordering</b> applies the ageing formula (and, in Adaptive-ML-G, the overrun guard), and the <b>quantum controller</b> recomputes the time slice. When a burst completes, the <b>feedback loop</b> records the error and stores the example for refitting. After a run, the <b>metrics collector</b> computes all measures and the <b>analysis</b> step produces tables and figures.</p>
 <figure class="keep">
 <svg viewBox="0 0 690 590" width="86%" xmlns="http://www.w3.org/2000/svg" font-family="Times New Roman, Times, serif" font-size="13" fill="none" stroke="#000">
   <defs>
@@ -97,7 +103,7 @@
   </g>
   <g fill="#000" stroke="none" text-anchor="middle">
     <text x="345" y="30" font-weight="bold">Workload Generator</text>
-    <text x="345" y="47">W1–W6, Poisson arrivals, CPU/I/O bursts</text>
+    <text x="345" y="47">W1–W7, Poisson arrivals, CPU/I/O bursts</text>
     <text x="345" y="118" font-weight="bold">Simulation Engine</text>
     <text x="345" y="137">clock, event queue, PCBs, context-switch cost</text>
     <text x="345" y="217" font-weight="bold">Scheduling Policy Interface</text>
@@ -109,7 +115,7 @@
     <text x="317" y="324">Feature</text><text x="317" y="341">Extractor</text>
     <text x="457" y="324">Burst Predictor</text><text x="457" y="341">(gradient boosting)</text>
     <text x="592" y="324">Process</text><text x="592" y="341">Classifier</text>
-    <text x="345" y="408">Ready-queue ordering</text><text x="345" y="426">P = r − β·w (ageing)</text>
+    <text x="345" y="408">Ready-queue ordering</text><text x="345" y="426">P = r − β·w, overrun guard</text>
     <text x="552" y="408">Quantum Controller</text><text x="552" y="426">80th pct × error ratio</text>
     <text x="452" y="486">Feedback loop: actual vs predicted burst,</text><text x="452" y="502">error log, training buffer, periodic refit</text>
     <text x="120" y="450" font-weight="bold">Metrics Collector</text>
@@ -154,35 +160,39 @@
 </ol>
 <p>Two details keep the engine correct. First, all events at the same time are processed before a decision is made, so processes arriving together are all considered (this is what makes the SJF example give exactly 3 ms). Second, when a slice is cut short by preemption, its pending <code>SLICE_END</code> event is cancelled with a token, so it cannot fire later by mistake.</p>
 
-<figure><img src="../../terminal/code_engine.png" alt="Fig. 2. The event loop and dispatch in scheduler/engine.py (Terminal, with line numbers)" style="width:70%"><figcaption>Fig. 2. The event loop and dispatch in scheduler/engine.py (Terminal, with line numbers)</figcaption></figure>
+<figure><img src="../../terminal/code_engine.png" alt="The event loop and dispatch in scheduler/engine.py (Terminal, with line numbers)" style="width:70%"><figcaption>Fig. 2. The event loop and dispatch in scheduler/engine.py (Terminal, with line numbers)</figcaption></figure>
 <h2>5. Code walkthrough, module by module</h2>
 <table class="compact long">
   <tr><th style="width:26%">File</th><th>What is inside</th></tr>
-  <tr><td>scheduler/workload.py</td><td><code>ProcessSpec</code> (one process: arrival, bursts, I/O waits, true class of each burst). <code>make_process</code> draws one process of a type. <code>generate_workload(profile, seed)</code> builds W1&ndash;W6 with Poisson arrivals at 85% load. <code>shifting_workload</code> builds the changing workload used for the quantum figure. <code>simple_processes</code> builds textbook examples.</td></tr>
+  <tr><td>scheduler/workload.py</td><td><code>ProcessSpec</code> (one process: arrival, bursts, I/O waits, true class of each burst). <code>make_process</code> draws one process of a type. <code>generate_workload(profile, seed)</code> builds W1&ndash;W6 with Poisson arrivals at 85% load. <code>shifting_workload</code> builds the changing workload used for the quantum figure. <code>simple_processes</code> builds textbook examples. The adversarial W7 and its <code>bait</code> process type are kept in <code>ADVERSARIAL_PROFILES</code>, separate from W1&ndash;W6.</td></tr>
   <tr><td>scheduler/engine.py</td><td><code>PCB</code> (run-time state), <code>Policy</code> (the interface: <code>on_ready, select, time_slice, should_preempt, on_quantum_expired, on_preempt, on_burst_complete, stats</code>), <code>Simulator</code> (event loop), <code>SimResult</code>.</td></tr>
   <tr><td>scheduler/baselines.py</td><td><code>FCFS</code>, <code>RoundRobin</code>, <code>SJF</code>, <code>SRTF</code>, <code>MLFQ</code>, <code>Oracle</code>; <code>PredictivePolicy</code> (shared code for policies that use a predictor); <code>estimated_remaining</code>.</td></tr>
   <tr><td>scheduler/features.py</td><td><code>ema_estimate</code>, <code>extract_features</code> (the 12 features), <code>build_dataset</code> (one row per burst for training).</td></tr>
-  <tr><td>scheduler/predictor.py</td><td><code>BurstPredictor</code> (base: times each prediction, logs each error), <code>EMAPredictor</code>, <code>MLPredictor</code> (learned model with online refit), <code>ProcessClassifier</code>.</td></tr>
-  <tr><td>scheduler/quantum.py</td><td><code>compute_quantum</code> (the percentile rule) and <code>QuantumController</code> (epochs, smoothing, error ratios, class modulation).</td></tr>
-  <tr><td>scheduler/adaptive.py</td><td><code>priority_score</code> and <code>AdaptiveScheduler</code> (ordering with ageing, uses the controller for the quantum).</td></tr>
+  <tr><td>scheduler/predictor.py</td><td><code>BurstPredictor</code> (base: times each prediction, logs each error), <code>EMAPredictor</code>, <code>MLPredictor</code> (learned model with online refit), <code>NoisyOraclePredictor</code> (diagnostic only), <code>ProcessClassifier</code>.</td></tr>
+  <tr><td>scheduler/quantum.py</td><td><code>compute_quantum</code> (the percentile rule) and <code>QuantumController</code> (epochs, smoothing, error ratios, class modulation, <code>ratio_percentile</code> used by the guard).</td></tr>
+  <tr><td>scheduler/adaptive.py</td><td><code>priority_score</code>, <code>guarded_remaining</code> (the overrun guard) and <code>AdaptiveScheduler</code> (ordering with ageing, optional guard and persistent ageing, uses the controller for the quantum).</td></tr>
   <tr><td>scheduler/metrics.py</td><td><code>per_process</code> (T, W, R per process), <code>summarize</code> (one result row per run), <code>jain_index</code>, <code>count_starved</code>, <code>oracle_gap_closed</code>.</td></tr>
-  <tr><td>scheduler/configs.py</td><td>The 11 configuration names, default parameters (&beta; = 0.03, p = 80, E = 50, &gamma; = 0.3), ablation variants, <code>make_policy(name)</code> and <code>run_policy(specs, name)</code>.</td></tr>
+  <tr><td>scheduler/configs.py</td><td>The 11 configuration names plus Adaptive-ML-G, -A and -GA, default parameters (&beta; = 0.03, p = 80, E = 50, &gamma; = 0.3), the tuned guard (c = 0.25, median ratio), ablation variants, <code>make_policy(name)</code> and <code>run_policy(specs, name)</code>.</td></tr>
   <tr><td>train_models.py</td><td>Builds the training data, compares 4 regressors and 2 classifiers, saves the chosen models.</td></tr>
   <tr><td>tune_beta.py</td><td>Chooses the ageing weight &beta; on separate seeds.</td></tr>
   <tr><td>run_experiments.py</td><td>Runs the full experiment in parallel across CPU cores and saves raw CSVs.</td></tr>
   <tr><td>analyse.py</td><td>Turns the CSVs into REPORT.md, a summary table and 8 figures.</td></tr>
   <tr><td>demo.py</td><td>10-second live demo in three parts (<code>--part 1/2/3</code>).</td></tr>
-  <tr><td>tests/</td><td>37 pytest tests (engine, policies, predictors, adaptive scheduler, metrics, workloads).</td></tr>
+  <tr><td>tune_innovation.py</td><td>Tunes the guard and persistent ageing on seeds 100&ndash;102; also measures how much waiting the ageing reset discards.</td></tr>
+  <tr><td>run_innovation.py</td><td>Prediction-quality sweep (<code>--part noise</code>) and the W1&ndash;W7 comparison of 14 configurations (<code>--part compare</code>); writes <code>results/innovation/</code>.</td></tr>
+  <tr><td>analyse_innovation.py</td><td>Paired statistics, <code>results/innovation/REPORT.md</code> and the three figures in <code>figures/innovation/</code>.</td></tr>
+  <tr><td>demo_innovation.py</td><td>10-second live demo of W7: SJF-EMA, RR-5, MLFQ, Adaptive-ML and Adaptive-ML-G on one instance.</td></tr>
+  <tr><td>tests/</td><td>53 pytest tests: the original 37 plus 16 for the noisy oracle, the guard, persistent ageing, W7 and reproduction of the saved results.</td></tr>
 </table>
-<figure><img src="../../terminal/01_project_files.png" alt="Fig. 3. Project files and the scheduler package" style="width:68%"><figcaption>Fig. 3. Project files and the scheduler package</figcaption></figure>
+<figure><img src="../../terminal/01_project_files.png" alt="Project files and the scheduler package" style="width:68%"><figcaption>Fig. 3. Project files and the scheduler package</figcaption></figure>
 <p>To see how small a policy is, this is the complete Round Robin and SJF code. Round Robin always picks the front of the queue with a fixed quantum; SJF picks the smallest predicted burst:</p>
-<figure><img src="../../terminal/code_baselines.png" alt="Fig. 4. Round Robin and SJF in scheduler/baselines.py" style="width:68%"><figcaption>Fig. 4. Round Robin and SJF in scheduler/baselines.py</figcaption></figure>
+<figure><img src="../../terminal/code_baselines.png" alt="Round Robin and SJF in scheduler/baselines.py" style="width:68%"><figcaption>Fig. 4. Round Robin and SJF in scheduler/baselines.py</figcaption></figure>
 
 
 <h2>6. The prediction model</h2>
 <h3>6.1 Features</h3>
 <p>For every process, 12 features are built only from bursts and I/O waits that have already finished, all of it information the operating system already has: the last 5 burst lengths, the mean and standard deviation of past bursts, the exponential average estimate, the last and mean I/O wait, the number of bursts completed, and the change between the last two bursts. A test checks that changing a process's future bursts does not change its features, which proves there is no leakage.</p>
-<figure><img src="../../terminal/code_features.png" alt="Fig. 5. Exponential averaging and the 12 features in scheduler/features.py" style="width:68%"><figcaption>Fig. 5. Exponential averaging and the 12 features in scheduler/features.py</figcaption></figure>
+<figure><img src="../../terminal/code_features.png" alt="Exponential averaging and the 12 features in scheduler/features.py" style="width:68%"><figcaption>Fig. 5. Exponential averaging and the 12 features in scheduler/features.py</figcaption></figure>
 <h3>6.2 Training</h3>
 <p><code>train_models.py</code> generates 2,000 processes (500 of each type) from seeds 1000&ndash;1004, which are never used in the experiments. Because the features depend only on a process's own history, the dataset (45,389 rows, one per burst) is built directly without running the simulator. It is split 75/25 <b>by process</b>, so no process appears in both training and testing.</p>
 <table class="compact">
@@ -193,21 +203,22 @@
   <tr><td><b>Gradient boosting, log target</b></td><td class="n"><b>10.62</b></td><td class="n">0.50 ms</td><td><b>Chosen</b>: 14% lower error, better for every type</td></tr>
 </table>
 <p>Selection rule: lowest error within a 1 ms latency budget, with Ridge preferred if within 5%. Training on log(burst) helps because burst lengths range from 0.05 ms to hundreds of ms. A logistic regression classifier (macro-F1 0.94) is also saved; a random forest scored 0.94 but was 20 times slower.</p>
-<figure><img src="../../terminal/03_train.png" alt="Fig. 6. Output of python train_models.py: model comparison and selection" style="width:84%"><figcaption>Fig. 6. Output of python train_models.py: model comparison and selection</figcaption></figure>
+<figure><img src="../../terminal/03_train.png" alt="Output of python train_models.py: model comparison and selection" style="width:84%"><figcaption>Fig. 6. Output of python train_models.py: model comparison and selection</figcaption></figure>
 <div class="box"><p><b>Why single-threaded?</b> scikit-learn normally uses all CPU cores, but the simulator asks for one prediction at a time. Starting threads for one row made each prediction take 3.7 ms instead of 0.5 ms, so <code>scheduler/__init__.py</code> sets <code>OMP_NUM_THREADS=1</code>.</p></div>
 <h3>6.3 Feedback loop</h3>
 <p>When a burst finishes, <code>observe()</code> compares it with the prediction, logs the error (this is how prediction MAE is reported for every run) and adds the example to a rolling buffer of 4,000. Every 2,000 new examples the model is refitted on 10,000 offline rows plus the buffer. The quantum controller also keeps the last 200 ratios <i>actual / predicted</i>.</p>
 
-<figure><img src="../../terminal/05_demo_prediction.png" alt="Fig. 7. Output of python demo.py --part 2: exponential averaging lagging, and EMA vs the learned model on a real process" style="width:66%"><figcaption>Fig. 7. Output of python demo.py --part 2: exponential averaging lagging, and EMA vs the learned model on a real process</figcaption></figure>
+<figure><img src="../../terminal/05_demo_prediction.png" alt="Output of python demo.py --part 2: exponential averaging lagging, and EMA vs the learned model on a real process" style="width:66%"><figcaption>Fig. 7. Output of python demo.py --part 2: exponential averaging lagging, and EMA vs the learned model on a real process</figcaption></figure>
 <h2>7. The adaptive scheduler in detail</h2>
 <h3>7.1 Who runs next</h3>
 <p class="eq">P = (predicted time left in the burst) &minus; &beta; &times; (time waited in the ready queue)</p>
 <p>The lowest P runs. <i>Predicted time left</i> is the prediction minus the CPU time already received in this burst; if the burst has already run longer than predicted, the original prediction is used again. <b>Example:</b> with &beta; = 0.1, process A predicted at 50 ms that has waited 400 ms has P = 50 &minus; 40 = 10; process B predicted at 5 ms that has waited 10 ms has P = 5 &minus; 1 = 4, so B runs. If A had waited 600 ms, P = &minus;10 and A would run first. With &beta; = 0 the scheduler is exactly SJF (checked by a test). The final value &beta; = 0.03 was picked by <code>tune_beta.py</code>.</p>
-<figure><img src="../../terminal/code_adaptive.png" alt="Fig. 8. The adaptive scheduler in scheduler/adaptive.py: priority with ageing, epoch trigger and quantum" style="width:68%"><figcaption>Fig. 8. The adaptive scheduler in scheduler/adaptive.py: priority with ageing, epoch trigger and quantum</figcaption></figure>
-<figure><img src="../../terminal/09_tune_beta.png" alt="Fig. 9. Output of python tune_beta.py: choosing &beta; on separate seeds" style="width:52%"><figcaption>Fig. 9. Output of python tune_beta.py: choosing &beta; on separate seeds</figcaption></figure>
+<p><b>The overrun guard (Adaptive-ML-G).</b> Falling back to the original prediction is exactly what goes wrong when a long burst was predicted as short: after every quantum it returns with the same short estimate. The guard keeps the normal rule until the burst has run longer than prediction &times; r, where r is the median of the last 200 ratios actual/predicted (at least 1). After that, time left = max(prediction, 0.25 &times; CPU time used). <b>Example:</b> predicted 1.2 ms, already ran 40 ms: time left 10 ms instead of 1.2 ms, so a new interactive burst predicted at 5 ms goes first; after 200 ms the burst looks like 50 ms. It never makes a burst look shorter than its prediction. c = 0.25 was chosen on seeds 100&ndash;102.</p>
+<figure><img src="../../terminal/code_adaptive.png" alt="The adaptive scheduler in scheduler/adaptive.py: priority with ageing, epoch trigger and quantum" style="width:68%"><figcaption>Fig. 8. The adaptive scheduler in scheduler/adaptive.py: priority with ageing, epoch trigger and quantum</figcaption></figure>
+<figure><img src="../../terminal/09_tune_beta.png" alt="Output of python tune_beta.py: choosing &beta; on separate seeds" style="width:52%"><figcaption>Fig. 9. Output of python tune_beta.py: choosing &beta; on separate seeds</figcaption></figure>
 <h3>7.2 How long it runs</h3>
 <p>Every 50 decisions, the quantum controller takes the predictions of the bursts that became ready in that period, multiplies each by every recent error ratio, takes the 80th percentile, clamps it to 1&ndash;100 ms, and smooths it: q = 0.3 &times; q<sub>new</sub> + 0.7 &times; q.</p>
-<figure><img src="../../terminal/code_quantum.png" alt="Fig. 10. The percentile rule and epoch update in scheduler/quantum.py" style="width:74%"><figcaption>Fig. 10. The percentile rule and epoch update in scheduler/quantum.py</figcaption></figure>
+<figure><img src="../../terminal/code_quantum.png" alt="The percentile rule and epoch update in scheduler/quantum.py" style="width:74%"><figcaption>Fig. 10. The percentile rule and epoch update in scheduler/quantum.py</figcaption></figure>
 <div class="box">
 <p><b>Worked example (I/O-bound workload).</b> Bursts average 2 ms, so almost every prediction is about 2 ms. If the quantum used the raw predictions, the 80th percentile would be about 2 ms, too small, because 20% of real exponential bursts with mean 2 ms are longer than 3.2 ms. The recent ratios actual/predicted are spread widely, and for exponential bursts their 80th percentile is about 1.6, so the 80th percentile of 2 &times; ratios is about <b>3.2 ms</b>, matching the textbook rule. Starting from q = 10 ms, smoothing gives 0.3 &times; 3.2 + 0.7 &times; 10 = 7.96 ms, then 6.5, 5.5, and so on, settling near 3.5 ms. This error-ratio fix was added after the first version produced quanta that were too small on W2 and W3.</p>
 </div>
@@ -226,10 +237,47 @@
 tune_beta.py     -&gt; results/beta_tuning.csv           (chooses beta = 0.03)
 run_experiments.py -&gt; results/main_results.csv, ablation.csv, sweeps.csv,
                       switch_cost.csv, quantum_trace.csv, prediction_trace.csv
-analyse.py       -&gt; results/REPORT.md, summary_means.csv, figures/fig1..fig8</pre></div>
-<p><b>Fairness of the comparison.</b> Every policy sees the same seeds (paired comparison), the oracle gives a reference point, and expected outcomes (H1&ndash;H7) were written down before any experiment. An improvement only counts if the mean paired improvement over seeds is bigger than one standard deviation.</p>
+analyse.py       -&gt; results/REPORT.md, summary_means.csv, figures/fig1..fig8
+tune_innovation.py -&gt; results/innovation/tuning.csv,
+                      ageing_reset_diagnostic.csv  (chooses c = 0.25)
+run_innovation.py  -&gt; results/innovation/noise_sweep.csv, comparison.csv
+analyse_innovation.py -&gt; results/innovation/REPORT.md, stats.csv,
+                         figures/innovation/innov1..3</pre></div>
+<p><b>Fairness of the comparison.</b> Every policy sees the same seeds (paired comparison), the oracle gives a reference point, and expected outcomes (H1&ndash;H7) were written down before any experiment. Review 1's rule was that an improvement only counts if the mean paired improvement over seeds is bigger than one standard deviation. On top of that, every main claim now has a paired bootstrap 95% confidence interval and an exact Wilcoxon test with Holm correction (Section 9.4).</p>
 
-<h2>9. Results and what they mean</h2>
+<h2>9. Robustness to prediction errors: the overrun guard, W7 and statistics</h2>
+<h3>9.1 How much prediction quality matters</h3>
+<p>The noisy oracle gives the scheduler the true burst times random error exp(&sigma;Z), for nine values of &sigma; from 0 (perfect) to 2, on W4 and W5 (<code>python run_innovation.py --part noise</code>, about 20 s). The same noisy predictions go to the full proposed mechanism and to plain SJF.</p>
+<figure><img src="../../../figures/innovation/innov1_prediction_quality.png" alt="Prediction-quality sweep" style="width:86%"><figcaption>Fig. 12. Average wait as prediction error grows; the real predictors are placed at their measured error</figcaption></figure>
+<ul>
+  <li><b>W4:</b> with perfect predictions the mechanism waits 1,384 ms against 1,934 ms for SJF (&minus;28.4%, 10/10 seeds). With the real model it waits 1,786 ms, so perfect predictions would still save 22.5%.</li>
+  <li><b>Real errors cost more than random ones.</b> The model's measured error spread is &sigma; = 1.25, but it performs like &sigma; = 1.86 on the noisy-oracle curve, because real errors are systematic.</li>
+  <li><b>W5:</b> the curve is flat (5,057 to 5,240 ms); with perfect predictions the mechanism is 9.0% worse than SJF (4,641 ms), so time slicing is the bottleneck there.</li>
+</ul>
+
+<h3>9.2 The adversarial workload W7 and the guard</h3>
+<p>W7 has 50% interactive, 20% I/O-bound and 30% bait processes. A bait process runs 10&ndash;20 bursts of about 1 ms, then one burst with a median of 400 ms, twice, then a few short bursts; the bait processes are 30% of the processes but <b>76% of the CPU demand</b> (72&ndash;80% across seeds). It was designed to attack the scheduler, not to look like a normal system.</p>
+<table class="compact">
+  <tr><th>W7, mean of 10 seeds (ms)</th><th class="n">Interactive wait</th><th class="n">Bait wait</th><th class="n">Avg wait (all)</th><th class="n">Worst wait</th><th class="n">Starved / run</th></tr>
+  <tr><td>SJF-EMA</td><td class="n">4,149</td><td class="n">4,169</td><td class="n">3,847</td><td class="n">13,766</td><td class="n">3.4</td></tr>
+  <tr><td>RR-5</td><td class="n">796</td><td class="n">3,977</td><td class="n">1,741</td><td class="n">9,803</td><td class="n">0.0</td></tr>
+  <tr><td>MLFQ</td><td class="n">443</td><td class="n">4,188</td><td class="n"><b>1,495</b></td><td class="n">10,536</td><td class="n">0.0</td></tr>
+  <tr><td>Adaptive-ML</td><td class="n">1,399</td><td class="n">4,378</td><td class="n">2,083</td><td class="n">21,382</td><td class="n">4.0</td></tr>
+  <tr><td><b>Adaptive-ML-G</b></td><td class="n"><b>112</b></td><td class="n">5,349</td><td class="n">1,634</td><td class="n">20,283</td><td class="n">6.9</td></tr>
+</table>
+<p>The guard lowers the average wait by 21.5% and interactive waiting by 92% (both on 10 of 10 seeds, significant). The bait processes pay: they wait 22% longer, and starved processes rise from 4.0 to 6.9. <b>MLFQ still has the lowest average wait on W7</b> (9.3% below the guard), and the worst case with the guard is about twice that of RR-5 and MLFQ.</p>
+<figure><img src="../../terminal/11_demo_w7.png" alt="W7 demo" style="width:72%"><figcaption>Fig. 13. Real output of python demo_innovation.py (W7, seed 0)</figcaption></figure>
+
+<h3>9.3 Cost of the guard elsewhere, and persistent ageing</h3>
+<p>On W1&ndash;W5 the guard changes the average wait by &minus;1.8% to +0.1%, none significant after correction; on W6 it lowers it by 1.6%. The W4 worst case rises by 5.6% (not significant after correction). Separately, the ageing term restarts after every time slice: on the tuning seeds this discards 70% of the waiting on W4 (84% for the ten worst-off processes). A persistent version (Adaptive-ML-A, &beta; = 0.01) improves W2 by 6.9%, but raises the average wait by 17.5% on W6 and 51.2% on W7, because the credit rewards the long bait bursts. <b>It was not kept.</b> The recommended configuration is Adaptive-ML-G.</p>
+<figure><img src="../../../figures/innovation/innov2_safeguards.png" alt="Safeguards" style="width:86%"><figcaption>Fig. 14. Each safeguard against Adaptive-ML on W1&ndash;W7, with 95% bootstrap confidence intervals</figcaption></figure>
+<figure><img src="../../terminal/12_tune_innovation.png" alt="Tuning" style="width:76%"><figcaption>Fig. 15. Real output of python tune_innovation.py: tuning grids on seeds 100&ndash;102 and the ageing-reset diagnostic</figcaption></figure>
+
+<h3>9.4 Statistical validation</h3>
+<p><code>analyse_innovation.py</code> compares configurations seed by seed: the change in the mean, a percentile bootstrap 95% confidence interval (10,000 resamples), the exact two-sided Wilcoxon signed-rank test, and a Holm correction within each family of related tests. With ten seeds the smallest possible p-value is 0.002. A result is called significant only if the Holm-corrected p is below 0.05; for example, the guard's +5.6% W4 worst case has unadjusted p = 0.027 but Holm p = 0.328, so it is <i>not</i> significant after correction.</p>
+<figure><img src="../../terminal/15_stats_guard.png" alt="Guard statistics" style="width:92%"><figcaption>Fig. 16. Real output: the guard against Adaptive-ML on W1&ndash;W7, and against the baselines on W7</figcaption></figure>
+
+<h2>10. Results and what they mean</h2>
 <table class="compact">
   <tr><th>Workload</th><th class="n">Avg wait vs SJF-EMA</th><th class="n">Worst wait vs SJF-EMA</th><th class="n">Seeds better</th><th class="n">Mean quantum</th></tr>
   <tr><td>W1 CPU-bound</td><td class="n">&minus;1.9%</td><td class="n">&minus;56%</td><td class="n">7/10</td><td class="n">92 ms</td></tr>
@@ -239,7 +287,7 @@ analyse.py       -&gt; results/REPORT.md, summary_means.csv, figures/fig1..fig8<
   <tr><td>W5 Phase-changing</td><td class="n">&minus;1.7%</td><td class="n">&minus;53%</td><td class="n">4/10</td><td class="n">95 ms</td></tr>
   <tr><td>W6 Overload</td><td class="n">+2.6%</td><td class="n">&minus;2%</td><td class="n">2/10</td><td class="n">14 ms</td></tr>
 </table>
-<figure><img src="../../../figures/fig1_avg_wait.png" alt="Fig. 12. Average waiting time for all 11 schedulers on the six workloads (10 seeds)" style="width:86%"><figcaption>Fig. 12. Average waiting time for all 11 schedulers on the six workloads (10 seeds)</figcaption></figure>
+<figure><img src="../../../figures/fig1_avg_wait.png" alt="Average waiting time for all 11 schedulers on the six workloads (10 seeds)" style="width:86%"><figcaption>Fig. 17. Average waiting time for all 11 schedulers on the six workloads (10 seeds)</figcaption></figure>
 <ul>
   <li><b>Where it helps:</b> mixed workloads, where short and long bursts compete. On W4 it beats every classical algorithm on average wait except SRTF-EMA (3% better on average, but 35% higher worst case and more switches).</li>
   <li><b>Ageing</b> is what controls the worst case: removing it doubles the worst wait on W5, and starved processes on W5 drop from 7.7 (SJF-EMA) to 0.2.</li>
@@ -249,8 +297,8 @@ analyse.py       -&gt; results/REPORT.md, summary_means.csv, figures/fig1..fig8<
   <li><b>Surprise:</b> on W5, plain FCFS beats even the oracle on average wait. With many bursts per process, always running the shortest burst first starves processes in their long phase. The oracle is a strong reference, not an absolute lower bound.</li>
 </ul>
 
-<figure><img src="../../terminal/06_demo_comparison.png" alt="Fig. 13. Output of python demo.py --part 3: all 11 schedulers on the mixed workload (one seed)" style="width:68%"><figcaption>Fig. 13. Output of python demo.py --part 3: all 11 schedulers on the mixed workload (one seed)</figcaption></figure>
-<h2>10. How to run everything</h2>
+<figure><img src="../../terminal/06_demo_comparison.png" alt="Output of python demo.py --part 3: all 11 schedulers on the mixed workload (one seed)" style="width:68%"><figcaption>Fig. 18. Output of python demo.py --part 3: all 11 schedulers on the mixed workload (one seed)</figcaption></figure>
+<h2>11. How to run everything</h2>
 <p><b>One-time setup</b> (Python 3.10 or newer; on this laptop it is already done):</p>
 <pre>cd ~/Desktop/ai_cpu_scheduler
 python3 -m venv .venv
@@ -259,25 +307,32 @@ pip install -r requirements.txt</pre>
 <p><b>Every time you open a new terminal:</b> <code>cd ~/Desktop/ai_cpu_scheduler &amp;&amp; source .venv/bin/activate</code></p>
 <table class="compact">
   <tr><th style="width:36%">Command</th><th class="n">Time</th><th>What it does</th></tr>
-  <tr><td><code>pytest</code> (or <code>pytest -v</code>)</td><td class="n">1 s</td><td>Runs the 37 tests</td></tr>
+  <tr><td><code>pytest</code> (or <code>pytest -v</code>)</td><td class="n">1 s</td><td>Runs the 53 tests</td></tr>
   <tr><td><code>python demo.py</code></td><td class="n">10 s</td><td>Full live demo; add <code>--part 1</code>, <code>2</code> or <code>3</code> for one part, <code>--workload W5</code> for another workload</td></tr>
   <tr><td><code>python train_models.py</code></td><td class="n">10 s</td><td>Retrains and compares the models</td></tr>
   <tr><td><code>python tune_beta.py</code></td><td class="n">70 s</td><td>Re-tunes &beta;</td></tr>
   <tr><td><code>python run_experiments.py</code></td><td class="n">4.5 min</td><td>Full experiment; <code>--quick</code> for 3 seeds in under a minute</td></tr>
   <tr><td><code>python analyse.py</code></td><td class="n">10 s</td><td>Rebuilds REPORT.md and the figures</td></tr>
-  <tr><td><code>sh docs/reviews/build.sh</code></td><td class="n">5 s</td><td>Rebuilds the three review PDFs (needs Google Chrome)</td></tr>
+  <tr><td><code>python demo_innovation.py</code></td><td class="n">10 s</td><td>Live W7 demo: the guard against SJF, RR-5, MLFQ and Adaptive-ML</td></tr>
+  <tr><td><code>python tune_innovation.py</code></td><td class="n">4.5 min</td><td>Re-tunes the guard and persistent ageing on seeds 100&ndash;102</td></tr>
+  <tr><td><code>python run_innovation.py</code></td><td class="n">5 min</td><td>Noise sweep and the W1&ndash;W7 comparison (<code>--part noise</code> or <code>compare</code> for one)</td></tr>
+  <tr><td><code>python analyse_innovation.py</code></td><td class="n">10 s</td><td>Rebuilds results/innovation/REPORT.md, stats.csv and figures/innovation/</td></tr>
+  <tr><td><code>sh docs/reviews/build.sh 3</code></td><td class="n">5 s</td><td>Rebuilds Review_3.pdf (run <code>python3 docs/reviews/src/number_refs.py</code> first; needs Google Chrome). Without an argument it rebuilds all three reviews.</td></tr>
 </table>
 <p><b>The demo, part by part.</b> Part 1 shows Gantt charts for four textbook examples and checks the averages (17, 3, 5.67, 6.5 ms). Part 2 shows exponential averaging lagging (2, 31, 45.5, 52.75) and compares EMA with the learned model on a real phase-changing process. Part 3 runs all 11 schedulers on one workload and prints average wait, worst wait, response, switches, prediction error and mean quantum, with Adaptive-ML highlighted.</p>
-<figure><img src="../../terminal/04_demo_textbook.png" alt="Fig. 14. Output of python demo.py --part 1: textbook checks with Gantt charts" style="width:64%"><figcaption>Fig. 14. Output of python demo.py --part 1: textbook checks with Gantt charts</figcaption></figure>
+<figure><img src="../../terminal/10_tests_innovation.png" alt="All 53 tests passing" style="width:78%"><figcaption>Fig. 19. Real output: the 16 new tests and all 53 tests passing</figcaption></figure>
+<figure><img src="../../terminal/04_demo_textbook.png" alt="Output of python demo.py --part 1: textbook checks with Gantt charts" style="width:64%"><figcaption>Fig. 20. Output of python demo.py --part 1: textbook checks with Gantt charts</figcaption></figure>
 <p><b>Troubleshooting.</b> &ldquo;burst_model.joblib not found&rdquo; means the models are missing: run <code>python train_models.py</code>. &ldquo;command not found: python&rdquo; or missing modules means the virtual environment is not active: run <code>source .venv/bin/activate</code>. Results are deterministic, so re-running gives the same numbers (only timing measurements vary).</p>
 
-<h2>11. Where everything is saved</h2>
+<h2>12. Where everything is saved</h2>
 <table class="compact">
   <tr><th style="width:34%">Location</th><th>Contents</th></tr>
   <tr><td>scheduler/</td><td>The simulator, schedulers, predictor and adaptive scheduler</td></tr>
-  <tr><td>tests/</td><td>The 37 tests</td></tr>
+  <tr><td>tests/</td><td>The 53 tests</td></tr>
   <tr><td>models/</td><td>burst_model.joblib (predictor), class_model.joblib (classifier)</td></tr>
   <tr><td>results/</td><td>REPORT.md (every result and verdict), main_results.csv (660 rows, one per run), ablation, sweeps, switch-cost and trace CSVs, model_report.json, run_info.json</td></tr>
+  <tr><td>results/innovation/</td><td>REPORT.md, stats.csv (every paired comparison), comparison.csv (980 runs, W1&ndash;W7, 14 configurations), noise_sweep.csv (480 runs), tuning.csv, tuning_round1.csv (superseded guard formula), ageing_reset_diagnostic.csv, run_info.json</td></tr>
+  <tr><td>figures/innovation/</td><td>innov1 prediction-quality sweep, innov2 safeguards against Adaptive-ML, innov3 W7 waiting by process kind</td></tr>
   <tr><td>figures/</td><td>fig1 average wait, fig2 switches vs response, fig3 worst case, fig4 quantum over time, fig5 prediction example, fig6 ablation, fig7 sweeps, fig8 prediction error</td></tr>
   <tr><td>docs/reviews/</td><td>Review_1.pdf, Review_2.pdf, Review_3.pdf and their HTML sources</td></tr>
   <tr><td>docs/terminal/</td><td>Real Terminal screenshots used in the reviews</td></tr>
@@ -286,27 +341,34 @@ pip install -r requirements.txt</pre>
   <tr><td>README.md</td><td>Short version of this guide</td></tr>
 </table>
 
-<h2>12. Limitations and future work</h2>
+<h2>13. Limitations and future work</h2>
 <ul>
   <li>Simulation only: one CPU, no caches or memory effects, no real kernel.</li>
   <li>Synthetic workloads: the model is trained and tested on the same generator (different seeds), which is also why online refit showed no benefit.</li>
   <li>A prediction takes about 0.5 ms in Python, far too slow for a kernel; a small decision tree or lookup table would be needed.</li>
-  <li>Linear ageing struggles under heavy overload; scaling it with the load is a natural fix.</li>
+  <li>Linear ageing struggles under heavy overload; scaling it with the load is a natural fix. Making the credit persistent made things worse (Section 9.3).</li>
+  <li>The guard is tested only empirically and on one adversarial pattern that we designed (W7, also part of the tuning set on seeds 100&ndash;102). MLFQ still beats it on W7's average wait, and its W7 worst case is about twice that of RR-5 and MLFQ.</li>
   <li>Next steps: real burst traces, moving the quantum controller into xv6, and multi-core scheduling.</li>
 </ul>
 
-<h2>13. Questions to be ready for</h2>
+<h2>14. Questions to be ready for</h2>
 <div class="qa">
 <p class="q">Why use machine learning at all?</p>
 <p>Exponential averaging uses one feature and lags after phase changes. The model uses 12 features and is 12&ndash;22% more accurate. But the honest finding is that most of the gain comes from using the prediction twice, not from accuracy alone (Adaptive-EMA vs Adaptive-ML shows this).</p>
 <p class="q">How do you know the simulator is correct?</p>
-<p>It reproduces textbook results exactly (17, 3, 5.67, 6.5 ms), every scheduler delivers the same total CPU time, event times never go backwards, and 37 tests pass.</p>
+<p>It reproduces textbook results exactly (17, 3, 5.67, 6.5 ms), every scheduler delivers the same total CPU time, event times never go backwards, and all 53 tests pass. Re-running the 11 original configurations also reproduces all 660 saved results exactly.</p>
 <p class="q">What if the prediction is wrong?</p>
-<p>A wrong prediction only affects ordering and quantum; the process still runs. Ageing guarantees a long-waiting process eventually goes first, and the quantum uses observed error ratios, so it adjusts for systematic errors.</p>
+<p>A wrong prediction only affects ordering and quantum; the process still runs. Ageing makes a long-waiting process go first eventually, the quantum uses observed error ratios, and the overrun guard stops a burst that has clearly outrun its prediction from being treated as short. Section 9 measures this directly.</p>
 <p class="q">Why not just use SRTF?</p>
 <p>SRTF-EMA is 3% better on average on W4 but has a 35% higher worst-case wait and more switches, because it preempts whenever a newly ready process has a shorter predicted remaining time, and it has no ageing.</p>
 <p class="q">How did you avoid tuning to the test data?</p>
-<p>The model was trained on seeds 1000&ndash;1004, &beta; was tuned on seeds 100&ndash;102, and the evaluation used seeds 0&ndash;9. All the other parameters came from the original plan.</p>
+<p>The model was trained on seeds 1000&ndash;1004; &beta;, the guard and persistent ageing were tuned on seeds 100&ndash;102; the evaluation used seeds 0&ndash;9. All the other parameters came from the original plan.</p>
+<p class="q">Why did you add the overrun guard?</p>
+<p>Because a burst that outruns its prediction keeps its short estimate and is picked again after every quantum. On W7 this made the scheduler lose to Round Robin and MLFQ. The guard cuts W7's average wait by 21.5% and interactive waiting by 92%, with no significant change on W1&ndash;W5.</p>
+<p class="q">Isn't W7 designed to make the guard look good?</p>
+<p>W7 is designed to expose the weakness, and the documents say it is adversarial. The guard still does not win everywhere on it: MLFQ has a 9.3% lower average wait and a much lower worst case. Its parameter was tuned on seeds 100&ndash;102 and the results come from seeds 0&ndash;9.</p>
+<p class="q">Why not keep persistent ageing?</p>
+<p>It matches the stated intent better, but it raised average waits by 17.5% on W6 and 51.2% on W7, because it rewards long mispredicted bursts.</p>
 <p class="q">Why does it lose on I/O-bound workloads?</p>
 <p>Bursts are short and random (exponential), so nothing can be predicted beyond the mean, and preempting at a small quantum adds context switches without improving the order.</p>
 </div>

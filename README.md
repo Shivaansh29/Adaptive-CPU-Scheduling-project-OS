@@ -15,9 +15,15 @@ that guess twice:
    "about 80% of bursts should fit in one quantum", applied continuously from
    live predictions instead of once by hand.
 
+Because a scheduler like this acts on its predictions, it also has to cope when
+they are wrong. An **overrun guard** stops a burst that has clearly outrun its
+prediction from being treated as a short job, and the evaluation includes a
+**prediction-quality sweep**, an intentionally **adversarial workload (W7)** and
+**paired statistical tests** for every main claim.
+
 It is tested in a discrete-event simulator against FCFS, SJF, SRTF, Round Robin
-(four quanta), MLFQ and an oracle that knows the future, on six workload types
-with ten random seeds each.
+(four quanta), MLFQ and an oracle that knows every true burst length, on six
+standard workload types plus the adversarial W7, with ten evaluation seeds each.
 
 ---
 
@@ -36,12 +42,16 @@ Then run these in order (the times are for a 10-core laptop):
 
 | Step | Command | Time | What it does |
 |---|---|---|---|
-| 1 | `pytest` | 1 s | 37 unit tests, including the textbook checks |
+| 1 | `pytest` | 1 s | 53 unit tests, including the textbook checks |
 | 2 | `python train_models.py` | 10 s | trains and compares the predictors, saves `models/` |
 | 3 | `python demo.py` | 10 s | **live demo for the presentation** |
 | 4 | `python tune_beta.py` | 1 min | chooses the ageing weight β on separate seeds |
 | 5 | `python run_experiments.py` | 5 min | the full experiment (1,060 simulation runs) |
 | 6 | `python analyse.py` | 10 s | writes `results/REPORT.md` and `figures/*.png` |
+| 7 | `python demo_innovation.py` | 10 s | **live W7 demo**: the overrun guard against SJF, RR-5, MLFQ and Adaptive-ML |
+| 8 | `python tune_innovation.py` | 4.5 min | tunes the guard and persistent ageing on seeds 100-102 |
+| 9 | `python run_innovation.py` | 5 min | prediction-quality sweep and the W1-W7 comparison (`--part noise` / `--part compare`) |
+| 10 | `python analyse_innovation.py` | 10 s | paired statistics, `results/innovation/REPORT.md`, `figures/innovation/*.png` |
 
 `python run_experiments.py --quick` (3 seeds, no sweeps) finishes in under a minute.
 `python demo.py --workload W5` runs the demo on another workload, and `python demo.py --part 1` (or `2`, `3`) runs a single part.
@@ -55,6 +65,11 @@ Then run these in order (the times are for a 10-core laptop):
 2. `figures/fig4_quantum_over_time.png`: the quantum following the workload.
 3. `figures/fig1_avg_wait.png` and `results/REPORT.md`: the full results and
    the verdict on every hypothesis.
+4. `python demo_innovation.py`: the bait-and-switch workload W7. Without the
+   guard, interactive processes wait about 1.2 s; with it, about 0.1 s.
+5. `figures/innovation/innov1_prediction_quality.png` and
+   `results/innovation/REPORT.md`: how much prediction quality matters, the
+   guard's effect on every workload, and all paired statistics.
 
 ## Final documents
 
@@ -62,21 +77,27 @@ Then run these in order (the times are for a 10-core laptop):
 |---|---|
 | `docs/reviews/Review_1.pdf` | Review 1: title and team, abstract, introduction, literature survey, gaps in existing work (8 pages) |
 | `docs/reviews/Review_2.pdf` | Review 2: proposed methodology, architecture, outputs with Terminal screenshots (10 pages) |
-| `docs/reviews/Review_3.pdf` | Review 3: performance evaluation, comparison with existing systems, conclusion and future work, references (10 pages) |
-| `docs/reviews/Review_3.pptx` | Review 3 presentation, 10 slides with speaker notes, screenshots and results |
-| `docs/guide/guide.pdf` | End-to-end project guide with code and output screenshots (15 pages) |
-| `docs/guide/transcript.pdf` | 5-minute speaking script for the Review 3 slides (key points in bold) |
+| `docs/reviews/Review_3.pdf` | Review 3: problem and motivation, evaluation, robustness to prediction errors (overrun guard, W7, prediction-quality sweep), statistical validation, comparison, conclusion and future work, references (10 pages) |
+| `docs/reviews/Review_3.pptx` | Review 3 presentation, 11 slides with speaker notes, screenshots and results |
+| `docs/reviews/Review_3_slides.pdf` | PDF export of the Review 3 slides |
+| `docs/guide/guide.pdf` | End-to-end project guide with code and output screenshots (21 pages) |
+| `docs/guide/transcript.pdf` | 5-minute speaking script for the 11 Review 3 slides (key points in bold) |
 | `docs/terminal/*.png` | Real Terminal screenshots of the project running and of the key code |
 
 **Rebuilding them** (all built from HTML sources with Google Chrome):
 
 ```bash
-sh docs/reviews/build.sh      # Review_1/2/3.pdf from docs/reviews/src/
+python3 docs/reviews/src/number_refs.py   # review3.html from review3_keys.html (numbers the citations)
+sh docs/reviews/build.sh 3    # Review_3.pdf only (Reviews 1 and 2 are final; no argument rebuilds all three)
 sh docs/guide/build.sh        # guide.pdf and transcript.pdf from docs/guide/src/
 ```
 
 The slide deck is built by `docs/reviews/src/review3_ppt.js` with Node and `pptxgenjs`
-(`NODE_PATH=<folder containing pptxgenjs>/node_modules node docs/reviews/src/review3_ppt.js`).
+(`npm install pptxgenjs` in any folder, then
+`NODE_PATH=<that folder>/node_modules node docs/reviews/src/review3_ppt.js`); the script also
+writes the theme colours. Its W4 chart is drawn by `python docs/reviews/src/make_w4_chart.py`
+from `results/main_results.csv`. `Review_3_slides.pdf` is the deck exported to PDF from
+Keynote (File > Export To > PDF); PowerPoint's Save As PDF works the same way.
 
 **Older material** from before the final reviews is kept in `docs/`: `project_review.pdf`,
 `ieee_paper.pdf` and `docs/screenshots/`. Those screenshots are terminal-style images
@@ -91,21 +112,26 @@ used in the reviews are in `docs/terminal/`. The older PDFs are rebuilt with
 ```
 ai_cpu_scheduler/
 ├── scheduler/              the library
-│   ├── workload.py         synthetic workloads W1-W6 (Poisson arrivals, 4 process types)
+│   ├── workload.py         synthetic workloads W1-W6, adversarial W7 (Poisson arrivals, 5 process types)
 │   ├── engine.py           discrete-event simulator: clock, event queue, PCBs, Policy interface
 │   ├── baselines.py        FCFS, SJF, SRTF, Round Robin, MLFQ, Oracle
 │   ├── features.py         12 features from a process's past bursts and I/O waits
-│   ├── predictor.py        exponential averaging, the learned predictor, the classifier
+│   ├── predictor.py        exponential averaging, the learned predictor, the classifier,
+│   │                       the noisy oracle (diagnostic only)
 │   ├── quantum.py          adaptive time-quantum controller
-│   ├── adaptive.py         the proposed scheduler (priority with ageing + quantum)
+│   ├── adaptive.py         the proposed scheduler (priority with ageing + quantum, overrun guard)
 │   ├── metrics.py          waiting/turnaround/response time, fairness, starvation
-│   └── configs.py          the 11 scheduler configurations, built by name
+│   └── configs.py          the 11 scheduler configurations + 3 safeguard variants, built by name
 ├── tests/                  pytest unit tests
 ├── train_models.py         trains and compares Ridge vs gradient boosting, LogReg vs random forest
 ├── tune_beta.py            picks the ageing weight on tuning seeds
 ├── run_experiments.py      runs the experiment matrix in parallel, writes results/*.csv
 ├── analyse.py              tables, hypothesis verdicts, figures
 ├── demo.py                 live terminal demo
+├── tune_innovation.py      tunes the overrun guard and persistent ageing on seeds 100-102
+├── run_innovation.py       prediction-quality sweep and W1-W7 comparison -> results/innovation/
+├── analyse_innovation.py   paired statistics, results/innovation/REPORT.md, figures/innovation/
+├── demo_innovation.py      live W7 demo of the overrun guard
 ├── make_screenshots.py     draws program output as terminal-style images (docs/screenshots/)
 ├── docs/
 │   ├── reviews/            Review 1, 2, 3 PDFs, Review 3 slides, and their sources
@@ -114,7 +140,9 @@ ai_cpu_scheduler/
 │   ├── src/, screenshots/  sources and images of the older review PDF and IEEE paper
 ├── models/                 trained models (created by train_models.py)
 ├── results/                raw CSVs, REPORT.md, model_report.json
+│   └── innovation/         guard, W7, noise sweep, tuning and statistics results
 └── figures/                PNG figures for the report and slides
+    └── innovation/         prediction-quality, safeguard and W7 figures
 ```
 
 ## How it works
@@ -188,6 +216,23 @@ spread of real bursts back. **Class modulation:** if the classifier says
 the recent processes are mostly interactive, p is lowered (a quicker response).
 If they are mostly CPU-bound, p is raised (fewer switches).
 
+**Overrun guard (Adaptive-ML-G).** "Predicted time left" is the prediction
+minus the CPU time already received; once a burst has outrun its prediction
+there is nothing better than the original prediction, so a long burst that was
+predicted to be short comes back after every quantum still looking short. The
+guard keeps the normal rule until the burst has run longer than
+`prediction × r` (r = median of the last 200 ratios actual/predicted, at least
+1), and then uses
+
+    time left = max(prediction, 0.25 × CPU time already used)
+
+so the burst never looks shorter than its prediction and sinks in the order the
+longer it runs (ordering by service received, as in least-attained-service
+scheduling). c = 0.25 was tuned on seeds 100-102. A second variant,
+**persistent ageing (Adaptive-ML-A)**, counts all ready-queue time since the
+burst started instead of only the current stay; it was evaluated and **not
+kept** (see results).
+
 ### Workloads (`workload.py`)
 
 | Type | CPU burst | I/O wait (mean) | Bursts |
@@ -208,6 +253,13 @@ If they are mostly CPU-bound, p is raised (fewer switches).
 
 200 processes per run, Poisson arrivals at 85% offered CPU load (W6: 255%).
 
+**W7 (bait-and-switch) is intentionally adversarial**: 50% interactive, 20%
+I/O-bound and 30% *bait* processes. A bait process runs 10-20 bursts of about
+1 ms (20 ms I/O), then one burst with a median of 400 ms, twice, then a few
+short bursts. Bait processes are 30% of the processes but **76% of the CPU
+demand** (72-80% across seeds). W7 lives in `ADVERSARIAL_PROFILES`, so
+`run_experiments.py` still runs exactly W1-W6.
+
 ### The 11 configurations
 
 FCFS · SJF-EMA · SRTF-EMA · RR-2 · RR-5 · RR-10 · RR-20 · MLFQ (4/8/16 ms, boost
@@ -217,6 +269,17 @@ scheduler with the classical predictor) · **Adaptive-ML** (our scheduler).
 6 workloads × 11 configurations × 10 seeds = **660 main runs**. Also: an ablation
 on W4 and W5 (120 runs), sweeps of β, p and E on W4 (130 runs), and
 context-switch cost 0.05/0.1/0.5 ms (150 runs).
+
+**Added after Review 2:** Adaptive-ML-G (guard), Adaptive-ML-A (persistent
+ageing) and Adaptive-ML-GA (both), compared with all 11 configurations on W1-W7
+(980 runs, seeds 0-9; the 660 original runs are reproduced exactly), and a
+prediction-quality sweep on W4 and W5 (480 runs).
+
+| Seeds | Used for |
+|---|---|
+| 1000-1004 | training the predictor |
+| 100-102 | tuning β, the guard and persistent ageing |
+| 0-9 | evaluation (never used for tuning) |
 
 ---
 
@@ -259,6 +322,56 @@ results are deterministic, so re-running gives exactly these numbers.
 | H5 | Never beats the oracle | **Supported** (0 of 60 instances) |
 | H6 | Lower prediction error than exponential averaging on W5, roughly comparable on W1 | **Supported** on W5; on W1 the model was 12% better rather than comparable |
 | H7 | Removing ageing slightly lowers the average but raises worst-case wait and starvation | **Partly**: W4 yes. On W5 the average does not drop, but the worst case doubles. |
+
+### Statistical validation
+
+Every comparison is paired by seed: change in the mean, a bootstrap 95%
+confidence interval, the exact Wilcoxon signed-rank test and a Holm correction
+within each family of tests. **Significant means Holm p < 0.05.** Examples
+(all in `results/innovation/stats.csv`):
+
+| Claim | Change | 95% CI | Holm p | Seeds better |
+|---|---|---|---|---|
+| W4 avg wait, Adaptive-ML vs SJF-EMA | −27.4% | −32.4 to −23.7 | 0.023 | 10/10 |
+| W2 avg wait, Adaptive-ML vs SJF-EMA | +13.8% (loss) | +9.7 to +16.9 | 0.023 | 0/10 |
+| W1, W3, W5, W6 avg wait vs SJF-EMA | −1.9 to +5.3% | | ≥ 0.387 | not significant |
+| W4 avg wait, Adaptive-ML vs MLFQ | −4.9% | −7.6 to −0.5 | 0.160 | not significant |
+
+### Robustness to prediction errors
+
+**How much prediction quality matters** (noisy oracle: true burst × exp(σZ),
+a diagnostic, never a real scheduler):
+
+- W4: with perfect predictions our mechanism waits 1,384 ms against 1,934 ms
+  for SJF (**−28.4%**, 10/10 seeds). With the real model it waits 1,786 ms, so
+  perfect predictions would save another 22.5%.
+- Real errors cost more than random errors: the model's measured error spread
+  is σ = 1.25 but it performs like σ = 1.86 on the sweep.
+- W5: the curve is flat (5,057 → 5,240 ms); time slicing, not the predictor,
+  is the bottleneck there.
+
+**The adversarial W7** (mean of 10 seeds, ms):
+
+| | Interactive wait | Bait wait | Avg wait | Worst wait | Starved/run |
+|---|---|---|---|---|---|
+| SJF-EMA | 4,149 | 4,169 | 3,847 | 13,766 | 3.4 |
+| RR-5 | 796 | 3,977 | 1,741 | 9,803 | 0.0 |
+| MLFQ | 443 | 4,188 | **1,495** | 10,536 | 0.0 |
+| Adaptive-ML | 1,399 | 4,378 | 2,083 | 21,382 | 4.0 |
+| **Adaptive-ML-G** | **112** | 5,349 | 1,634 | 20,283 | 6.9 |
+
+- The guard cuts W7's average wait by **21.5%** and interactive waiting by
+  **92%** (both 10/10 seeds, significant).
+- **Trade-offs:** MLFQ still has the lowest average wait on W7 (9.3% below the
+  guard); the worst case with the guard is about twice that of RR-5 and MLFQ;
+  bait processes wait 22% longer.
+- **Elsewhere:** on W1-W5 the guard changes the average wait by −1.8% to
+  +0.1% (none significant); W4 worst case +5.6% (not significant after
+  correction).
+- **Persistent ageing (negative result):** the ageing reset discards 70% of the
+  ready-queue waiting on W4, but counting it all raised the average wait by
+  17.5% on W6 and 51.2% on W7. Not kept. **Recommended configuration:
+  Adaptive-ML-G.**
 
 ### What the results mean
 
@@ -337,6 +450,12 @@ results are deterministic, so re-running gives exactly these numbers.
 9. **Ageing** uses the time a process has waited since it last entered the
    ready queue.
 10. Ablation gained a **"No online refit"** variant, to test the feedback loop.
+11. **Added after Review 2:** the overrun guard, the persistent-ageing variant,
+    the adversarial W7 workload, the noisy-oracle sweep and paired statistics.
+    The first guard formula (c × CPU time used, without the max) could make a
+    burst look shorter than its prediction; it was corrected and re-tuned
+    before any evaluation run (`results/innovation/tuning_round1.csv` keeps the
+    first round).
 
 ## Limitations
 
@@ -345,6 +464,9 @@ results are deterministic, so re-running gives exactly these numbers.
   tested on (different seeds and processes). Real programs would be messier.
 - The online refit cannot show a benefit here, because there is no
   distribution shift between training and testing.
+- The overrun guard is tested only empirically, on one adversarial pattern we
+  designed (W7, which was also in the tuning set on seeds 100-102). It is not
+  a complete defence: MLFQ beats it on W7's average wait.
 - Prediction latency (0.5 ms in the isolated benchmark, about 1.2 ms measured
   inside the parallel experiment) is far above what a kernel could afford. A real implementation would need a much smaller model, such as a
   shallow tree or a lookup table.
@@ -360,4 +482,6 @@ context-switch accounting, I/O accounting, identical CPU service across all
 policies, monotonic event times, exponential averaging (6, 4, 6 → 8, 6, 6, and
 the 2,2,2,2,60 lag), the no-leakage check, prediction clamping, the ageing
 example (50 − 0.1 × 400 = 10), the quantum percentile (8.4), β = 0 reproducing
-SJF exactly, MLFQ demotion, and workload reproducibility.
+SJF exactly, MLFQ demotion, and workload reproducibility. The 16 newer tests
+cover the noisy oracle, the overrun guard (never shorter than the prediction),
+persistent ageing credit, W7, and reproduction of the saved results.
