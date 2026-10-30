@@ -9,7 +9,8 @@ from . import metrics
 from .adaptive import AdaptiveScheduler
 from .baselines import FCFS, MLFQ, SJF, SRTF, Oracle, RoundRobin
 from .engine import Simulator
-from .predictor import EMAPredictor, MLPredictor, ProcessClassifier, load_bundle
+from .predictor import (EMAPredictor, MLPredictor, NoisyOraclePredictor, ProcessClassifier,
+                        load_bundle)
 from .quantum import QuantumController
 
 MODEL_DIR = Path(__file__).resolve().parent.parent / "models"
@@ -41,6 +42,30 @@ ADAPTIVE_DEFAULTS = dict(
     adaptive_quantum=True, class_mod=True, use_quantum=True, online=True,
 )
 
+# Safeguards added after Review 3 (see tune_innovation.py). Each is a separate
+# named configuration; Adaptive-ML itself is unchanged. The values are filled
+# in from the tuning run on seeds 100-102, never from evaluation seeds.
+GUARD = dict(overrun_c=0.25, overrun_q=50)   # tune_innovation.py, seeds 100-102
+PERSISTENT_BETA = 0.01                       # same tuning run
+INNOVATION_CONFIGS = ["Adaptive-ML-G", "Adaptive-ML-A", "Adaptive-ML-GA"]
+DESCRIPTIONS.update({
+    "Adaptive-ML-G": "Adaptive-ML + overrun guard",
+    "Adaptive-ML-A": "Adaptive-ML + persistent ageing credit",
+    "Adaptive-ML-GA": "Adaptive-ML + overrun guard + persistent ageing credit",
+})
+
+
+def innovation_overrides(name: str) -> dict:
+    out = {}
+    if name in ("Adaptive-ML-G", "Adaptive-ML-GA"):
+        out.update(GUARD)
+    if name in ("Adaptive-ML-A", "Adaptive-ML-GA"):
+        out["persistent_ageing"] = True
+        if PERSISTENT_BETA is not None:
+            out["beta"] = PERSISTENT_BETA
+    return out
+
+
 # Ablation study: switch off one part of Adaptive-ML at a time.
 ABLATIONS = {
     "Full": {},
@@ -71,20 +96,32 @@ def make_policy(name: str, **overrides):
         return MLFQ()
     if name == "Oracle":
         return Oracle()
-    if name in ("Adaptive-EMA", "Adaptive-ML"):
-        cfg = {**ADAPTIVE_DEFAULTS, **overrides}
+    # Diagnostic only: predictions are the TRUE burst times random error.
+    #   SJF-Noisy-0.5, Adaptive-Noisy-0.5, ...  (the number is sigma)
+    if name.startswith("SJF-Noisy-"):
+        return SJF(NoisyOraclePredictor(float(name[10:]), overrides.get("noise_seed", 0)))
+    if name in INNOVATION_CONFIGS:
+        return make_policy("Adaptive-ML", _name=name, **{**innovation_overrides(name), **overrides})
+    if name in ("Adaptive-EMA", "Adaptive-ML") or name.startswith("Adaptive-Noisy-"):
+        display = overrides.pop("_name", name)
+        cfg = {**ADAPTIVE_DEFAULTS, "overrun_c": None, "overrun_q": 90,
+               "persistent_ageing": False, **overrides}
         burst_bundle, class_bundle = load_models()
         if name == "Adaptive-ML":
             predictor = MLPredictor(burst_bundle, online=cfg["online"])
-        else:
+        elif name == "Adaptive-EMA":
             predictor = EMAPredictor()
+        else:
+            predictor = NoisyOraclePredictor(float(name[15:]), cfg.get("noise_seed", 0))
         classifier = ProcessClassifier(class_bundle) if cfg["class_mod"] else None
         controller = QuantumController(
             p=cfg["p"], epoch=cfg["epoch"], gamma=cfg["gamma"], q_min=cfg["q_min"],
             q_max=cfg["q_max"], q_init=cfg["q_init"], adaptive=cfg["adaptive_quantum"],
             classifier=classifier)
         return AdaptiveScheduler(predictor, controller, beta=cfg["beta"],
-                                 use_quantum=cfg["use_quantum"], name=name)
+                                 use_quantum=cfg["use_quantum"], name=display,
+                                 overrun_c=cfg["overrun_c"], overrun_q=cfg["overrun_q"],
+                                 persistent_ageing=cfg["persistent_ageing"])
     raise ValueError(f"unknown policy {name!r}")
 
 

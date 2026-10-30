@@ -65,6 +65,12 @@ class QuantumController:
         """Record how a finished burst compared with its prediction."""
         self._ratios.append(min(max(actual / predicted, 0.01), 100.0))
 
+    def ratio_percentile(self, q: float) -> float:
+        """q-th percentile of recent actual / predicted ratios (1.0 until there is data)."""
+        if len(self._ratios) < self.min_samples:
+            return 1.0
+        return float(np.percentile(self._ratios, q))
+
     def epoch_percentile(self) -> float:
         if self.classifier is None or not self._pcbs:
             return self.p

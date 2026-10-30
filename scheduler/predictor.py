@@ -28,6 +28,8 @@ class BurstPredictor:
         self._n = 0
         self._abs_err = 0.0
         self._sq_err = 0.0
+        self._log_err = 0.0      # sums of log(actual / predicted), for pred_log_sd
+        self._log_sq = 0.0
         self._calls = 0
         self._seconds = 0.0
 
@@ -47,6 +49,9 @@ class BurstPredictor:
         self._n += 1
         self._abs_err += abs(err)
         self._sq_err += err * err
+        log_err = math.log(max(actual, MIN_PREDICTION) / pcb.estimate)
+        self._log_err += log_err
+        self._log_sq += log_err * log_err
         self._learn(pcb, actual)
 
     def stats(self) -> dict:
@@ -55,6 +60,9 @@ class BurstPredictor:
             "pred_mae": self._abs_err / n,
             "pred_rmse": math.sqrt(self._sq_err / n),
             "pred_latency_us": 1e6 * self._seconds / max(self._calls, 1),
+            # Spread of the multiplicative error: comparable with the sigma of
+            # NoisyOraclePredictor, so real predictors can be placed on that axis.
+            "pred_log_sd": math.sqrt(max(self._log_sq / n - (self._log_err / n) ** 2, 0.0)),
         }
 
     def _predict(self, pcb) -> float:
@@ -73,6 +81,31 @@ class EMAPredictor(BurstPredictor):
 
     def _predict(self, pcb) -> float:
         return ema_estimate(pcb.history, self.alpha, self.tau0)
+
+
+class NoisyOraclePredictor(BurstPredictor):
+    """DIAGNOSTIC ONLY: the true burst length times controlled random error.
+
+        prediction = true burst * exp(sigma * Z),   Z ~ N(0, 1)
+
+    It reads the real burst length, which no real scheduler can do, so it is
+    never a candidate scheduler. It exists to measure how scheduling quality
+    changes as prediction quality gets worse (sigma = 0 is a perfect predictor).
+    The noise for burst k of process pid depends only on (seed, pid, k), so
+    every policy sees exactly the same noisy prediction for the same burst.
+    """
+
+    def __init__(self, sigma: float, seed: int = 0):
+        super().__init__()
+        self.sigma, self.seed = sigma, seed
+        self.name = f"Noisy-{sigma:g}"
+
+    def _predict(self, pcb) -> float:
+        true = pcb.spec.bursts[pcb.burst_index]
+        if self.sigma == 0:
+            return true
+        z = np.random.default_rng([self.seed, pcb.pid, pcb.burst_index]).standard_normal()
+        return true * math.exp(self.sigma * z)
 
 
 class MLPredictor(BurstPredictor):

@@ -15,6 +15,7 @@ from dataclasses import dataclass, replace
 import numpy as np
 
 CPU, IO, INTERACTIVE, PHASE = "cpu", "io", "interactive", "phase"
+BAIT = "bait"   # adversarial: long runs of tiny bursts, then one very long burst
 
 # Labels a single burst can have. A phase-changing process produces I/O-bound
 # bursts first and CPU-bound bursts later, so "phase" is never a burst label.
@@ -27,6 +28,12 @@ CLASS_PARAMS = {
     INTERACTIVE: {"burst": ("exponential", 5.0), "io_mean": 100.0, "count": (10, 40)},
 }
 PHASE_COUNT = (10, 30)
+# Bait-and-switch processes (W7). Each cycle is 10-20 bursts of about 1 ms
+# (with 20 ms I/O, like a loader reading small blocks), then one burst with a
+# median of 400 ms (like a compression step). Two cycles, then a short tail.
+BAIT_SHORT_MEAN, BAIT_SHORT_IO = 1.0, 20.0
+BAIT_LONG_MEDIAN, BAIT_LONG_SIGMA = 400.0, 0.25
+BAIT_RUN, BAIT_CYCLES, BAIT_TAIL = (10, 20), 2, (3, 6)
 LOGNORMAL_SIGMA = 0.5   # CPU-bound bursts: median 100 ms, mean about 113 ms
 MIN_TIME = 0.05         # floor so exponential draws never give near-zero times
 
@@ -50,6 +57,15 @@ PROFILES = {p.name: p for p in [
     Profile("W5", "All phase-changing", {PHASE: 1.0}, stream=5),
     Profile("W6", "Mixed at 3x arrival rate (overload)", _MIXED, 3.0, stream=4),
 ]}
+
+
+# Adversarial profiles live apart from PROFILES so that the main experiment
+# (which loops over PROFILES) still runs exactly W1 to W6.
+ADVERSARIAL_PROFILES = {p.name: p for p in [
+    Profile("W7", "Bait-and-switch (50% interactive, 20% I/O, 30% bait)",
+            {INTERACTIVE: 0.5, IO: 0.2, BAIT: 0.3}, stream=7),
+]}
+ALL_PROFILES = {**PROFILES, **ADVERSARIAL_PROFILES}
 
 
 @dataclass(frozen=True)
@@ -84,8 +100,29 @@ def _draw_io(rng, cls: str) -> float:
     return max(float(rng.exponential(CLASS_PARAMS[cls]["io_mean"])), MIN_TIME)
 
 
+def _make_bait(rng, pid: int, arrival: float) -> ProcessSpec:
+    bursts, ios, classes = [], [], []
+
+    def short(n):
+        for _ in range(n):
+            bursts.append(max(float(rng.exponential(BAIT_SHORT_MEAN)), MIN_TIME))
+            ios.append(max(float(rng.exponential(BAIT_SHORT_IO)), MIN_TIME))
+            classes.append(IO)
+
+    for _ in range(BAIT_CYCLES):
+        short(int(rng.integers(BAIT_RUN[0], BAIT_RUN[1] + 1)))
+        bursts.append(float(rng.lognormal(np.log(BAIT_LONG_MEDIAN), BAIT_LONG_SIGMA)))
+        ios.append(max(float(rng.exponential(BAIT_SHORT_IO)), MIN_TIME))
+        classes.append(CPU)
+    short(int(rng.integers(BAIT_TAIL[0], BAIT_TAIL[1] + 1)))
+    ios.pop()   # no I/O after the last burst
+    return ProcessSpec(pid, float(arrival), BAIT, tuple(bursts), tuple(ios), tuple(classes))
+
+
 def make_process(rng, pid: int, kind: str, arrival: float = 0.0) -> ProcessSpec:
     """Draw one process of the given kind."""
+    if kind == BAIT:
+        return _make_bait(rng, pid, arrival)
     if kind == PHASE:
         n = int(rng.integers(PHASE_COUNT[0], PHASE_COUNT[1] + 1))
         half = n // 2
@@ -102,13 +139,13 @@ def make_process(rng, pid: int, kind: str, arrival: float = 0.0) -> ProcessSpec:
 
 def generate_workload(profile, seed: int, n_processes: int = 200,
                       load: float = 0.85) -> list[ProcessSpec]:
-    """Generate one instance of a workload profile (W1 to W6).
+    """Generate one instance of a workload profile (W1 to W7).
 
     Arrivals are Poisson. The arrival rate is chosen so that the offered CPU
     load (arrival rate x mean CPU demand per process) equals `load`, and is
     then multiplied by the profile's rate multiplier (3x for W6).
     """
-    prof = PROFILES[profile] if isinstance(profile, str) else profile
+    prof = ALL_PROFILES[profile] if isinstance(profile, str) else profile
     rng = np.random.default_rng([seed, prof.stream])
     kinds = list(prof.mix)
     chosen = rng.choice(len(kinds), size=n_processes, p=[prof.mix[k] for k in kinds])
